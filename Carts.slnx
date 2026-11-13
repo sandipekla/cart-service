@@ -1,5 +1,9 @@
 <Solution>
   <Folder Name="/src/">
     <Project Path="src/Carts.Api/Carts.Api.csproj" />
+    <Project Path="src/Carts.Domain/Carts.Domain.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Carts.UnitTests/Carts.UnitTests.csproj" />
   </Folder>
 </Solution>

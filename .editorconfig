@@ -21,3 +21,7 @@ csharp_using_directive_placement = outside_namespace:warning
 dotnet_sort_system_directives_first = true
 # Unused usings fail the format check.
 dotnet_diagnostic.IDE0005.severity = warning
+
+[tests/**.cs]
+# Test names are sentences with underscores: Setting_an_identical_item_changes_nothing.
+dotnet_diagnostic.CA1707.severity = none
