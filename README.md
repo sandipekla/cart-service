@@ -1,10 +1,13 @@
 # Cart service
 
-A minimal Cart Web API for a retail platform, built with ASP.NET Core on .NET 10.
+A minimal Cart Web API for a retail platform, built with ASP.NET Core on .NET 10. The
+platform design it belongs to is in [docs/architecture.md](docs/architecture.md); this
+repository implements one service of it.
 
 > **Status: work in progress.** The repository is built in small steps and this README only
-> describes what exists. So far: the solution skeleton with a liveness endpoint and the CI
-> workflow. The cart endpoints and the PostgreSQL database are not here yet.
+> describes what exists. So far: the solution skeleton with a liveness endpoint, the CI
+> workflow and the architecture document. The cart endpoints and the PostgreSQL database are
+> not here yet; section 11 of the architecture document tracks what is implemented.
 
 ## Prerequisites
 
@@ -38,6 +41,7 @@ dotnet format --no-restore --verify-no-changes      # formatting and style follo
 ## Layout
 
 ```text
+docs/architecture.md     platform design
 src/Carts.Api/           ASP.NET Core minimal API
 .github/workflows/       CI
 Directory.Build.props    compiler settings shared by every project
