@@ -34,6 +34,19 @@ public class CartCreateTests
     }
 
     [Fact]
+    public void Times_are_kept_to_the_microsecond()
+    {
+        var withTicks = Now.AddTicks(1_234_567);
+
+        var cart = Cart.Create("alice", withTicks);
+        cart.SetItem(TestProducts.TShirt, 2, withTicks.AddTicks(9));
+
+        Assert.Equal(Now.AddTicks(1_234_560), cart.CreatedAt);
+        Assert.Equal(Now.AddTicks(1_234_570), cart.UpdatedAt);
+        Assert.Equal(Now.AddTicks(1_234_570), Assert.Single(cart.Items).AddedAt);
+    }
+
+    [Fact]
     public void The_lines_cannot_be_changed_from_outside_the_cart()
     {
         var cart = Cart.Create("alice", Now);

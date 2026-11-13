@@ -239,8 +239,8 @@ other's tables. A worker is a second process of the service that owns the data i
 **The Cart service in the platform.** The cart is resolved from the access token, so there is
 no cart id in any public URL and another user's cart cannot be addressed. Product names and
 prices come from the service's own `products` table. In the platform that table is keyed by
-SKU and market and fed from Catalog and Pricing events; the implementation planned for this
-repository uses demo data for a single market instead (section 11 says what exists). A cart line's price is a display snapshot; the binding price is computed at checkout.
+SKU and market and fed from Catalog and Pricing events; the implementation in this repository
+fills it with demo data for a single market instead. A cart line's price is a display snapshot; the binding price is computed at checkout.
 Checkout reads a cart through an internal endpoint that needs a service token and is not
 routed by the gateway.
 
@@ -483,7 +483,7 @@ tickets. Every alert has a duration and a runbook.
 | Endpoint | Meaning | Orchestrator reaction |
 |---|---|---|
 | `/health/live` | The process responds. No dependencies | Restart when failing |
-| `/health/ready` | The database answers within a short timeout | Stop routing traffic when failing; never restart |
+| `/health/ready` | The database answers within a few seconds and has the schema this build needs | Stop routing traffic when failing; never restart |
 
 A failing third party does not make a replica unready; circuit breakers and alerts handle
 that. When the database is down every replica is unready together, which is accurate. Workers
@@ -571,12 +571,12 @@ below is kept in step with the code and says what exists today.
 | Solution skeleton, liveness endpoint (`/health/live`), structured JSON logs | Implemented |
 | CI workflow: warnings are errors, including packages with a known vulnerability; format check; tests | Implemented |
 | Cart rules: quantity and line limits, one currency per cart, price snapshot | Implemented, with unit tests |
-| PostgreSQL persistence with EF Core migrations; readiness endpoint (`/health/ready`) | Planned in this repository |
+| PostgreSQL persistence with EF Core migrations; a migrate step separate from serving; readiness endpoint (`/health/ready`) | Implemented, with tests on a real PostgreSQL |
 | Dockerfile and Docker Compose: database, migrations, demo data, API | Planned in this repository |
 | JWT bearer authentication; development-only token endpoint; cart resolved from the token | Planned in this repository |
 | Four cart endpoints with validation and Problem Details errors | Planned in this repository |
 | Safe concurrent updates: writes on one cart serialised by a database lock | Planned in this repository |
-| Integration tests through HTTP on a real PostgreSQL | Planned in this repository |
+| Integration tests of the cart endpoints through HTTP | Planned in this repository |
 | Outbox and `cart.changed` events; the consumers that feed `products` and clear a cart after an order | Proposed only |
 | Internal cart read for checkout; guest carts and merge at login; cart expiry | Proposed only |
 | Rate limiting, OpenTelemetry traces and metrics | Proposed only |

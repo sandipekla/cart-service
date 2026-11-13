@@ -4,6 +4,7 @@
     <Project Path="src/Carts.Domain/Carts.Domain.csproj" />
   </Folder>
   <Folder Name="/tests/">
+    <Project Path="tests/Carts.IntegrationTests/Carts.IntegrationTests.csproj" />
     <Project Path="tests/Carts.UnitTests/Carts.UnitTests.csproj" />
   </Folder>
 </Solution>

@@ -6,5 +6,5 @@ public enum CartError
     InvalidQuantity,
     ProductUnavailable,
     CurrencyMismatch,
-    LineLimitExceeded,
+    ItemLimitExceeded,
 }

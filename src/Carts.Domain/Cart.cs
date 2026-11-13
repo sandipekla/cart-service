@@ -9,7 +9,7 @@ public sealed class Cart
     {
         Id = id;
         UserId = userId;
-        CreatedAt = createdAt.ToUniversalTime();
+        CreatedAt = CartTime.Normalize(createdAt);
         UpdatedAt = CreatedAt;
     }
 
@@ -67,15 +67,15 @@ public sealed class Cart
             return CartError.CurrencyMismatch;
         }
 
-        var line = FindLine(product.Sku);
+        var line = FindItem(product.Sku);
         if (line is null)
         {
-            if (_items.Count >= CartLimits.MaxLines)
+            if (_items.Count >= CartLimits.MaxItems)
             {
-                return CartError.LineLimitExceeded;
+                return CartError.ItemLimitExceeded;
             }
 
-            _items.Add(new CartItem(product.Sku, product.Name, product.UnitPrice, quantity, now.ToUniversalTime()));
+            _items.Add(new CartItem(product.Sku, product.Name, product.UnitPrice, quantity, CartTime.Normalize(now)));
             Currency = product.Currency;
             MarkChanged(now);
         }
@@ -92,7 +92,7 @@ public sealed class Cart
     {
         ArgumentNullException.ThrowIfNull(sku);
 
-        var line = FindLine(sku);
+        var line = FindItem(sku);
         if (line is null)
         {
             return;
@@ -121,11 +121,11 @@ public sealed class Cart
     }
 
     // SKUs are compared exactly, including case.
-    private CartItem? FindLine(string sku) => _items.Find(item => item.Sku == sku);
+    private CartItem? FindItem(string sku) => _items.Find(item => item.Sku == sku);
 
     private void MarkChanged(DateTimeOffset now)
     {
         Version++;
-        UpdatedAt = now.ToUniversalTime();
+        UpdatedAt = CartTime.Normalize(now);
     }
 }

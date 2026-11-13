@@ -281,7 +281,7 @@ public class CartSetItemTests
 
         var error = cart.SetItem(TestProducts.Numbered(51), 1, Second);
 
-        Assert.Equal(CartError.LineLimitExceeded, error);
+        Assert.Equal(CartError.ItemLimitExceeded, error);
         Assert.Equal(50, cart.Items.Count);
         Assert.Equal(50, cart.Version);
         Assert.Equal(First, cart.UpdatedAt);

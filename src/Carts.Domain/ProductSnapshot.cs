@@ -32,7 +32,7 @@ public sealed record ProductSnapshot
         }
 
         // Only the shape of an ISO 4217 code is checked; which currencies exist is the catalog's knowledge.
-        if (currency.Length != 3 || !currency.All(char.IsAsciiLetterUpper))
+        if (currency.Length != CartLimits.CurrencyCodeLength || !currency.All(char.IsAsciiLetterUpper))
         {
             throw new ArgumentException("A currency code is three uppercase letters.", nameof(currency));
         }
