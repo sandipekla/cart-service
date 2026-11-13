@@ -574,11 +574,10 @@ below is kept in step with the code and says what exists today.
 | PostgreSQL persistence with EF Core migrations; a migrate step separate from serving; readiness endpoint (`/health/ready`) | Implemented, with tests on a real PostgreSQL |
 | Dockerfile (multi-stage, unprivileged user) and Docker Compose: database, migrate step with demo data, API, health checks, persistent volume | Implemented; CI starts the stack from nothing |
 | JWT bearer authentication; development-only token endpoint; cart resolved from the token; one error format (problem details); OpenAPI description and documentation page in Development | Implemented, with tests |
-| Reading the cart (`GET /api/v1/cart`) | Implemented, with tests |
-| Changing the cart: set an item, remove an item, clear; request validation | Planned in this repository |
+| The four cart endpoints: read, set an item, remove an item, clear; request validation; cart errors with stable codes | Implemented, with tests |
 | Safe concurrent updates: writes on one cart serialised by a database lock | Planned in this repository |
-| Integration tests through HTTP on a real PostgreSQL: authentication, reading the cart, error format | Implemented |
-| Integration tests of changing the cart, including concurrent requests | Planned in this repository |
+| Integration tests through HTTP on a real PostgreSQL: authentication, every cart endpoint, validation, error format | Implemented |
+| Tests with concurrent requests on one cart | Planned in this repository |
 | Outbox and `cart.changed` events; the consumers that feed `products` and clear a cart after an order | Proposed only |
 | Internal cart read for checkout; guest carts and merge at login; cart expiry | Proposed only |
 | Rate limiting, OpenTelemetry traces and metrics | Proposed only |

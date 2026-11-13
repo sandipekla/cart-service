@@ -1,6 +1,7 @@
 using Carts.Api.Products;
 using Carts.Domain;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging.Abstractions;
 using Npgsql;
 
 namespace Carts.IntegrationTests;
@@ -15,7 +16,7 @@ public class ProductCatalogTests(PostgresFixture postgres)
         var sku = await AddProductAsync(name: "Notebook A5", unitPrice: 3.4900m, currency: "EUR", isActive: true);
         await using var db = postgres.CreateContext();
 
-        var product = await new ProductCatalog(db).FindAsync(sku, Cancellation);
+        var product = await new ProductCatalog(db, NullLogger<ProductCatalog>.Instance).FindAsync(sku, Cancellation);
 
         Assert.NotNull(product);
         Assert.Equal(sku, product.Sku);
@@ -31,7 +32,7 @@ public class ProductCatalogTests(PostgresFixture postgres)
         var sku = await AddProductAsync(name: "Poster 2019", unitPrice: 12m, currency: "EUR", isActive: false);
         await using var db = postgres.CreateContext();
 
-        var product = await new ProductCatalog(db).FindAsync(sku, Cancellation);
+        var product = await new ProductCatalog(db, NullLogger<ProductCatalog>.Instance).FindAsync(sku, Cancellation);
 
         Assert.False(product!.IsActive);
     }
@@ -41,7 +42,7 @@ public class ProductCatalogTests(PostgresFixture postgres)
     {
         await using var db = postgres.CreateContext();
 
-        Assert.Null(await new ProductCatalog(db).FindAsync("NO-SUCH-SKU", Cancellation));
+        Assert.Null(await new ProductCatalog(db, NullLogger<ProductCatalog>.Instance).FindAsync("NO-SUCH-SKU", Cancellation));
     }
 
     [Fact]
@@ -50,7 +51,7 @@ public class ProductCatalogTests(PostgresFixture postgres)
         var sku = await AddProductAsync(name: "Notebook A5", unitPrice: 3.49m, currency: "EUR", isActive: true);
         await using var db = postgres.CreateContext();
 
-        Assert.Null(await new ProductCatalog(db).FindAsync(sku.ToLowerInvariant(), Cancellation));
+        Assert.Null(await new ProductCatalog(db, NullLogger<ProductCatalog>.Instance).FindAsync(sku.ToLowerInvariant(), Cancellation));
     }
 
     [Theory]
@@ -86,7 +87,7 @@ public class ProductCatalogTests(PostgresFixture postgres)
                 Cancellation);
 
             Assert.True(SkuFormat.IsValid(sku));
-            Assert.NotNull(await new ProductCatalog(db).FindAsync(sku, Cancellation));
+            Assert.NotNull(await new ProductCatalog(db, NullLogger<ProductCatalog>.Instance).FindAsync(sku, Cancellation));
         }
     }
 

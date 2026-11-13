@@ -74,7 +74,16 @@ jobs:
           echo "status for a 100 kB body: $status"
           test "$status" = "413"
 
-      - name: Stop it, start it again, and check it is the same database
+      - name: Put an item in a cart, then remove it
+        run: |
+          token="$(curl --fail --silent --show-error --request POST http://localhost:8080/dev/token --header 'Content-Type: application/json' --data '{"userId":"ci"}' | sed -E 's/.*"accessToken":"([^"]+)".*/\1/')"
+          cart=http://localhost:8080/api/v1/cart
+          curl --fail --silent --show-error --request PUT "$cart/items/TSHIRT-BLK-M" --header "Authorization: Bearer $token" --header 'Content-Type: application/json' --data '{"quantity":2}' | grep --quiet '"quantity":2'
+          curl --fail --silent --show-error --request PUT "$cart/items/MUG-WHT" --header "Authorization: Bearer $token" --header 'Content-Type: application/json' --data '{"quantity":1}' | grep --quiet '"total":47.48'
+          curl --fail --silent --show-error --request DELETE "$cart/items/MUG-WHT" --header "Authorization: Bearer $token" | grep --quiet '"total":39.98'
+          test "$(curl --silent --output /dev/null --write-out '%{http_code}' --request PUT "$cart/items/POSTER-2019" --header "Authorization: Bearer $token" --header 'Content-Type: application/json' --data '{"quantity":1}')" = "422"
+
+      - name: Stop it, start it again, and check the database and the cart are still there
         run: |
           database_id() {
             docker compose exec -T db psql --username carts --dbname carts --tuples-only --no-align --command 'select system_identifier from pg_control_system()'
@@ -86,6 +95,8 @@ jobs:
           after="$(database_id)"
           echo "database before: $before, after: $after"
           test -n "$before" && test "$before" = "$after"
+          token="$(curl --fail --silent --show-error --request POST http://localhost:8080/dev/token --header 'Content-Type: application/json' --data '{"userId":"ci"}' | sed -E 's/.*"accessToken":"([^"]+)".*/\1/')"
+          curl --fail --silent --show-error http://localhost:8080/api/v1/cart --header "Authorization: Bearer $token" | grep --quiet '"sku":"TSHIRT-BLK-M"'
 
       - name: Show the logs if anything failed
         if: failure()

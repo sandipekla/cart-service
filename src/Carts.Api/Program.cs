@@ -23,6 +23,7 @@ await using var app = BuildApp(hostArgs);
 app.UseExceptionHandler();
 app.UseStatusCodePages();
 
+app.UseNoStoreForCartAnswers();
 app.UseCartAuth();
 
 app.MapHealthEndpoints();
@@ -60,6 +61,9 @@ static WebApplication BuildApp(string[] hostArgs)
     {
         // A number is a number: "2" in quotes is not accepted where a quantity is expected.
         options.SerializerOptions.NumberHandling = JsonNumberHandling.Strict;
+
+        // A body that names the same field twice is refused, not resolved by "the last one wins".
+        options.SerializerOptions.AllowDuplicateProperties = false;
         options.SerializerOptions.Converters.Add(new PlainDecimalJsonConverter());
     });
 

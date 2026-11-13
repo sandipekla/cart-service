@@ -5,6 +5,9 @@ namespace Carts.IntegrationTests;
 
 public class ApiDocsTests(PostgresFixture postgres)
 {
+    private static readonly string[] DocumentedForSet = ["200", "400", "401", "404", "422"];
+    private static readonly string[] DocumentedForRemove = ["200", "400", "401"];
+
     private static CancellationToken Cancellation => TestContext.Current.CancellationToken;
 
     [Theory]
@@ -53,5 +56,27 @@ public class ApiDocsTests(PostgresFixture postgres)
         var responses = document.RootElement.GetProperty("paths").GetProperty("/api/v1/cart").GetProperty("get").GetProperty("responses");
         Assert.True(responses.TryGetProperty("200", out _));
         Assert.True(responses.TryGetProperty("401", out _));
+    }
+
+    [Fact]
+    public async Task The_api_description_covers_the_routes_that_change_a_cart()
+    {
+        await using var factory = new CartApiFactory(postgres.ConnectionString);
+        using var client = factory.CreateClient();
+
+        using var document = JsonDocument.Parse(await client.GetStringAsync("/openapi/v1.json", Cancellation));
+
+        var paths = document.RootElement.GetProperty("paths");
+        var item = paths.GetProperty("/api/v1/cart/items/{sku}");
+        var put = item.GetProperty("put").GetProperty("responses");
+        Assert.All(DocumentedForSet, status => Assert.True(put.TryGetProperty(status, out _), $"PUT does not document {status}."));
+        var delete = item.GetProperty("delete").GetProperty("responses");
+        Assert.All(DocumentedForRemove, status => Assert.True(delete.TryGetProperty(status, out _), $"DELETE item does not document {status}."));
+        Assert.True(paths.GetProperty("/api/v1/cart").TryGetProperty("delete", out _));
+        Assert.True(item.GetProperty("put").TryGetProperty("security", out _));
+
+        var quantity = document.RootElement.GetProperty("components").GetProperty("schemas").GetProperty("SetItemRequest").GetProperty("properties").GetProperty("quantity");
+        Assert.Equal(1, quantity.GetProperty("minimum").GetInt32());
+        Assert.Equal(99, quantity.GetProperty("maximum").GetInt32());
     }
 }

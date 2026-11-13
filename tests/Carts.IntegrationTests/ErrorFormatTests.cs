@@ -44,6 +44,7 @@ public class ErrorFormatTests(PostgresFixture postgres)
 
         Assert.Equal(HttpStatusCode.InternalServerError, response.StatusCode);
         Assert.Equal("application/problem+json", response.Content.Headers.ContentType?.MediaType);
+        Assert.True(response.Headers.CacheControl?.NoStore);
         var body = await response.Content.ReadAsStringAsync(Cancellation);
         using var problem = JsonDocument.Parse(body);
         Assert.Equal(500, problem.RootElement.GetProperty("status").GetInt32());

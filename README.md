@@ -7,8 +7,8 @@ repository implements one service of it.
 > **Status: work in progress.** The repository is built in small steps and this README only
 > describes what exists. So far: the architecture document, the cart's business rules, the
 > PostgreSQL schema with its migration, a one-command Docker setup, token authentication and
-> reading a cart. Changing a cart (adding, updating and removing items) is not here yet;
-> section 11 of the architecture document tracks what is implemented.
+> the four cart endpoints. Protection against two requests changing one cart at the same
+> moment is not here yet; section 11 of the architecture document tracks what is implemented.
 
 The API contract, with examples, is in [docs/api.md](docs/api.md).
 
@@ -38,7 +38,17 @@ Open <http://localhost:8080/scalar>. It lists the API's endpoints and can call t
 1. Under **Development**, run `POST /dev/token` with a body such as `{"userId":"alice"}` and
    copy the `accessToken` from the answer.
 2. Paste it into the **Authentication** box at the top of the page (bearer token).
-3. Under **Cart**, run `GET /api/v1/cart`.
+3. Under **Cart**, run `PUT /api/v1/cart/items/{sku}` with `sku` set to `TSHIRT-BLK-M` and
+   the body `{"quantity":2}`, then `GET /api/v1/cart`.
+
+The demo catalog has eight products. Two of them are there to try the rules:
+
+| SKU | What happens |
+|---|---|
+| `TSHIRT-BLK-M`, `MUG-WHT`, `HOODIE-GRY-M`, ... | Ordinary products priced in EUR |
+| `POSTER-2019` | No longer sold: `422 product_unavailable` |
+| `GIFTCARD-USD-25` | Priced in USD: `422 currency_mismatch` once the cart holds a EUR product |
+| any other SKU | `404 product_not_found` |
 
 ### Try it from a terminal
 
@@ -47,8 +57,18 @@ TOKEN=$(curl -s -X POST http://localhost:8080/dev/token \
   -H 'Content-Type: application/json' -d '{"userId":"alice"}' \
   | sed -E 's/.*"accessToken":"([^"]+)".*/\1/')
 
-curl -i http://localhost:8080/api/v1/cart -H "Authorization: Bearer $TOKEN"    # 200, the empty cart
-curl -i http://localhost:8080/api/v1/cart                                      # 401, no token
+CART=http://localhost:8080/api/v1/cart
+AUTH="Authorization: Bearer $TOKEN"
+JSON='Content-Type: application/json'
+
+curl -i $CART -H "$AUTH"                                                        # 200, the empty cart
+curl -i -X PUT $CART/items/TSHIRT-BLK-M -H "$AUTH" -H "$JSON" -d '{"quantity":2}'  # 200, one line
+curl -i -X PUT $CART/items/MUG-WHT -H "$AUTH" -H "$JSON" -d '{"quantity":1}'       # 200, two lines
+curl -i -X PUT $CART/items/POSTER-2019 -H "$AUTH" -H "$JSON" -d '{"quantity":1}'   # 422, no longer sold
+curl -i -X PUT $CART/items/MUG-WHT -H "$AUTH" -H "$JSON" -d '{"quantity":0}'       # 400, quantity out of range
+curl -i -X DELETE $CART/items/MUG-WHT -H "$AUTH"                                # 200, one line again
+curl -i -X DELETE $CART -H "$AUTH"                                              # 200, empty
+curl -i $CART                                                                   # 401, no token
 
 curl -i http://localhost:8080/health/live     # 200 Healthy: the process responds
 curl -i http://localhost:8080/health/ready    # 200 Healthy: the database answers and is migrated; 503 otherwise
@@ -176,6 +196,24 @@ export DOCKER_HOST="unix://$HOME/.colima/default/docker.sock"
 export TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE=/var/run/docker.sock
 ```
 
+## API
+
+Four endpoints, all under `/api/v1/cart`, all answering with the cart as it now is. The full
+contract, with examples and every error, is in [docs/api.md](docs/api.md).
+
+| Method | Address | Does |
+|---|---|---|
+| `GET` | `/api/v1/cart` | Returns the caller's cart |
+| `PUT` | `/api/v1/cart/items/{sku}` | Sets the quantity of a product (it replaces, it never adds) |
+| `DELETE` | `/api/v1/cart/items/{sku}` | Removes a product |
+| `DELETE` | `/api/v1/cart` | Removes every product |
+
+- Requests are validated before anything else happens: a malformed SKU or a quantity outside
+  1 to 99 is a `400` that names the field, and the database is never asked.
+- A broken cart rule is a `404` or `422` with a stable `code` a client can switch on.
+- A request that is refused, or that changes nothing, writes nothing.
+- Every change is logged with the cart id, its new version and the user id.
+
 ## Cart rules
 
 The rules live in `src/Carts.Domain`, a project with no dependencies, so they can be read and
@@ -205,8 +243,10 @@ dotnet format --no-restore --verify-no-changes      # formatting and style follo
 dotnet test --no-build --configuration Release
 ```
 
-A second CI job starts the Compose stack from nothing and checks that the API becomes ready
-and the demo catalog is there.
+A second CI job starts the Compose stack from nothing and uses it the way a person would: it
+checks that the API becomes ready and the demo catalog is there, gets a token, puts items in a
+cart and removes one, checks that an oversized body is refused, then stops the stack, starts
+it again and checks that both the database and the cart are still there.
 
 In CI warnings are errors, including NuGet's warning about a package with a known
 vulnerability. The one exception is being unable to reach the advisory database, which only
