@@ -6,9 +6,11 @@ repository implements one service of it.
 
 > **Status: work in progress.** The repository is built in small steps and this README only
 > describes what exists. So far: the architecture document, the cart's business rules, the
-> PostgreSQL schema with its migration, health endpoints, a one-command Docker setup, tests
-> and the CI workflow. The cart endpoints and authentication are not here yet; section 11 of
-> the architecture document tracks what is implemented.
+> PostgreSQL schema with its migration, a one-command Docker setup, token authentication and
+> reading a cart. Changing a cart (adding, updating and removing items) is not here yet;
+> section 11 of the architecture document tracks what is implemented.
+
+The API contract, with examples, is in [docs/api.md](docs/api.md).
 
 ## Run
 
@@ -27,9 +29,27 @@ This starts three containers:
 | `migrate` | Creates the schema and a small demo catalog, then exits |
 | `api` | The API, started only after `migrate` has finished successfully |
 
-When the `api` container reports healthy, the API is on <http://localhost:8080>:
+When the `api` container reports healthy, the API is on <http://localhost:8080>.
+
+### Try it in the browser
+
+Open <http://localhost:8080/scalar>. It lists the API's endpoints and can call them.
+
+1. Under **Development**, run `POST /dev/token` with a body such as `{"userId":"alice"}` and
+   copy the `accessToken` from the answer.
+2. Paste it into the **Authentication** box at the top of the page (bearer token).
+3. Under **Cart**, run `GET /api/v1/cart`.
+
+### Try it from a terminal
 
 ```bash
+TOKEN=$(curl -s -X POST http://localhost:8080/dev/token \
+  -H 'Content-Type: application/json' -d '{"userId":"alice"}' \
+  | sed -E 's/.*"accessToken":"([^"]+)".*/\1/')
+
+curl -i http://localhost:8080/api/v1/cart -H "Authorization: Bearer $TOKEN"    # 200, the empty cart
+curl -i http://localhost:8080/api/v1/cart                                      # 401, no token
+
 curl -i http://localhost:8080/health/live     # 200 Healthy: the process responds
 curl -i http://localhost:8080/health/ready    # 200 Healthy: the database answers and is migrated; 503 otherwise
 ```
@@ -52,8 +72,10 @@ Things to know:
   holds one of them: set `API_PORT` or `DB_PORT` in `.env`.
 - If `migrate` fails with "password authentication failed", the database volume was created
   with a different password. `docker compose down --volumes` removes it.
-- The stack runs in the `Development` environment, which is what adds the demo catalog. The
-  image itself names no environment, so anywhere else it runs as `Production`.
+- The stack runs in the `Development` environment. That is what adds the demo catalog, the
+  token endpoint and the documentation page, and the API says so in a warning when it starts.
+  The image itself names no environment, so anywhere else it runs as `Production`: no token
+  endpoint, no documentation page, and no start without an identity provider configured.
 - The database password in `compose.yaml` is a throwaway for a database only this machine can
   reach.
 - On the very first start PostgreSQL logs one error about a missing `__EFMigrationsHistory`
@@ -77,6 +99,30 @@ dotnet run --project src/Carts.Api
 Run this way the API listens on <http://localhost:5080> and uses the connection string in
 `appsettings.Development.json`, which points at the Compose database on its default port and
 password. If you changed either in `.env`, set `ConnectionStrings__Carts` to match.
+
+## Authentication
+
+- Every cart endpoint needs a bearer token. The cart is found from the token's `sub` claim;
+  no address, query or body can name a user or a cart, so one user cannot reach another's.
+- In `Development`, `POST /dev/token` issues a token for any user id. Its signing key is made
+  up when the API starts and exists only in memory, so there is no development secret in the
+  repository, in configuration or in the image. A restart invalidates earlier tokens.
+- In every other environment tokens come from an OpenID Connect provider: set
+  `Auth__Authority` (an `https` address) and `Auth__Audience`. The API refuses to start
+  without them, accepts only RS256 and ES256 signatures, and has no token endpoint.
+- Each endpoint declares whether it needs a token. A test fails if one does not say, and
+  another lists exactly which endpoints are open: the two health endpoints, plus the token
+  endpoint and the documentation in `Development`.
+- Every error has one format, problem details (RFC 9457), and never shows a stack trace.
+  What is logged while a request is handled carries the user id, and a request that fails
+  with an unhandled error gets one more line naming the user. Tokens are never logged.
+- The answer to a bad token is a plain `401`: it does not say what was wrong with the token.
+- Token validation is fixed in code. A setting in the framework's own
+  `Authentication:Schemes:Bearer` section cannot add an issuer, an audience or a signing key,
+  or point the API at a plain `http` key address.
+- A request body larger than 16 KB is refused with `413`.
+- One thing the access tests cannot see: code added as plain middleware, outside the mapped
+  endpoints, is not covered by "every endpoint declares whether it needs a token".
 
 ## Database
 
@@ -179,8 +225,14 @@ Dockerfile                     the API image: build stage and runtime stage
 compose.yaml                   the local stack: database, migrate step, API
 .env.example                   the optional settings of the local stack
 docs/architecture.md           platform design
+docs/api.md                    the API contract, with examples
 src/Carts.Domain/              cart rules; no package references
 src/Carts.Api/                 ASP.NET Core minimal API
+  Features/Carts/              cart endpoints, the shape of their answers, the service behind them
+  Auth/                        token validation, the current user, the development token endpoint
+  ApiDocs/                     OpenAPI description and the documentation page (Development only)
+  Health/                      liveness and readiness endpoints
+  Json/                        how amounts are written
   Persistence/                 database context, table mappings, migrations, setup step
   Products/                    the service's own copy of product data
 tests/Carts.UnitTests/         unit tests for the cart rules

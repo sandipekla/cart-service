@@ -9,7 +9,8 @@ x-api: &api
   # A small init process as PID 1, so signals and exit codes behave as they do outside a container.
   init: true
   environment:
-    # Development turns on the demo products. The image itself defaults to Production.
+    # Development turns on the demo products, the token endpoint and the documentation page.
+    # The image itself defaults to Production.
     ASPNETCORE_ENVIRONMENT: Development
     ConnectionStrings__Carts: Host=db;Port=5432;Database=carts;Username=carts;Password=${POSTGRES_PASSWORD:-carts-local-only}
 

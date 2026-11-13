@@ -60,6 +60,20 @@ jobs:
           echo "products in the database: $products"
           test "$products" -gt 0
 
+      - name: Get a token and read the cart with it
+        run: |
+          token="$(curl --fail --silent --show-error --request POST http://localhost:8080/dev/token --header 'Content-Type: application/json' --data '{"userId":"ci"}' | sed -E 's/.*"accessToken":"([^"]+)".*/\1/')"
+          curl --fail --silent --show-error http://localhost:8080/api/v1/cart --header "Authorization: Bearer $token"
+          echo
+          test "$(curl --silent --output /dev/null --write-out '%{http_code}' http://localhost:8080/api/v1/cart)" = "401"
+
+      - name: Check that an oversized request body is refused
+        run: |
+          head --bytes 100000 /dev/zero | tr '\0' 'a' > /tmp/large-body
+          status="$(curl --silent --output /dev/null --write-out '%{http_code}' --request POST http://localhost:8080/dev/token --header 'Content-Type: application/json' --data-binary @/tmp/large-body)"
+          echo "status for a 100 kB body: $status"
+          test "$status" = "413"
+
       - name: Stop it, start it again, and check it is the same database
         run: |
           database_id() {

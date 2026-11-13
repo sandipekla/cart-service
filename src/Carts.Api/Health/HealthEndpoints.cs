@@ -12,10 +12,12 @@ public static class HealthEndpoints
         // Liveness runs no checks: it only says the process responds. A failing dependency
         // must never get the container restarted.
         app.MapHealthChecks("/health/live", new HealthCheckOptions { Predicate = _ => false })
-            .WithMetadata(new HttpMethodMetadata([HttpMethods.Get]));
+            .WithMetadata(new HttpMethodMetadata([HttpMethods.Get]))
+            .AllowAnonymous();
 
         // Readiness asks the database. Failing means "stop sending me traffic", not "restart me".
         app.MapHealthChecks("/health/ready", new HealthCheckOptions { Predicate = check => check.Tags.Contains(ReadyTag) })
-            .WithMetadata(new HttpMethodMetadata([HttpMethods.Get]));
+            .WithMetadata(new HttpMethodMetadata([HttpMethods.Get]))
+            .AllowAnonymous();
     }
 }
