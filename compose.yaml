@@ -1,0 +1,67 @@
+# Local stack: PostgreSQL, a one-shot step that creates the schema and demo products, the API.
+#   docker compose up --build
+# Every value has a default; copy .env.example to .env to change a port or the password.
+
+name: cart-service
+
+x-api: &api
+  image: cart-service:local
+  # A small init process as PID 1, so signals and exit codes behave as they do outside a container.
+  init: true
+  environment:
+    # Development turns on the demo products. The image itself defaults to Production.
+    ASPNETCORE_ENVIRONMENT: Development
+    ConnectionStrings__Carts: Host=db;Port=5432;Database=carts;Username=carts;Password=${POSTGRES_PASSWORD:-carts-local-only}
+
+services:
+  db:
+    image: postgres:17-alpine@sha256:d3244e8ce3f165ee3c93d9c4a4b1d0fe48b3a89e2287b717fdcbbde92d405065
+    environment:
+      POSTGRES_DB: carts
+      POSTGRES_USER: carts
+      # A throwaway password for a database that only this machine can reach.
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-carts-local-only}
+    ports:
+      - "127.0.0.1:${DB_PORT:-5433}:5432"
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    healthcheck:
+      # Over TCP on purpose: while the image initialises itself it only listens on a socket.
+      test: ["CMD-SHELL", "pg_isready --host 127.0.0.1 --username carts --dbname carts"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+      start_period: 5s
+
+  # Schema changes are a step of their own; the API never migrates while starting or serving.
+  # It runs the image that the api service builds, so the image is built once.
+  migrate:
+    <<: *api
+    pull_policy: never
+    command: ["--migrate"]
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: "no"
+
+  api:
+    <<: *api
+    build: .
+    # The image only exists locally, so never look for it in a registry.
+    pull_policy: build
+    ports:
+      - "127.0.0.1:${API_PORT:-8080}:8080"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--output-document=/dev/null", "http://127.0.0.1:8080/health/ready"]
+      interval: 5s
+      timeout: 6s
+      retries: 5
+      # Generous on purpose: a slow machine must not be reported as a failed start.
+      start_period: 60s
+
+volumes:
+  # Carts survive "docker compose down". "docker compose down --volumes" starts from nothing.
+  db-data:

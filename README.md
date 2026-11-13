@@ -6,44 +6,77 @@ repository implements one service of it.
 
 > **Status: work in progress.** The repository is built in small steps and this README only
 > describes what exists. So far: the architecture document, the cart's business rules, the
-> PostgreSQL schema with its migration, health endpoints, tests and the CI workflow. The cart
-> endpoints, authentication and a one-command Docker setup are not here yet; section 11 of
+> PostgreSQL schema with its migration, health endpoints, a one-command Docker setup, tests
+> and the CI workflow. The cart endpoints and authentication are not here yet; section 11 of
 > the architecture document tracks what is implemented.
-
-## Prerequisites
-
-- [.NET 10 SDK](https://dotnet.microsoft.com/download/dotnet/10.0), version 10.0.100 or later
-- Docker, for the database and for the integration tests
 
 ## Run
 
-Start a local PostgreSQL. The password below is a throwaway for local use and matches
-`appsettings.Development.json`:
+The only prerequisite is Docker with Compose v2 (Docker Desktop, or Docker Engine with the
+Compose plugin).
 
 ```bash
-docker run -d --name carts-db \
-  -e POSTGRES_DB=carts -e POSTGRES_USER=carts -e POSTGRES_PASSWORD=carts-local-only \
-  -p 127.0.0.1:5433:5432 postgres:17-alpine
+docker compose up --build
 ```
 
-Create the schema, then start the API:
+This starts three containers:
+
+| Container | What it does |
+|---|---|
+| `db` | PostgreSQL 17. Its data lives in a named volume |
+| `migrate` | Creates the schema and a small demo catalog, then exits |
+| `api` | The API, started only after `migrate` has finished successfully |
+
+When the `api` container reports healthy, the API is on <http://localhost:8080>:
 
 ```bash
+curl -i http://localhost:8080/health/live     # 200 Healthy: the process responds
+curl -i http://localhost:8080/health/ready    # 200 Healthy: the database answers and is migrated; 503 otherwise
+```
+
+In Windows PowerShell use `curl.exe`, because `curl` alone is an alias for another command.
+
+Stopping and resetting:
+
+```bash
+docker compose down              # stop; the database keeps its data
+docker compose down --volumes    # stop and delete the data, so the next start begins from nothing
+```
+
+Things to know:
+
+- Nothing needs to be configured. To change a port or the database password, copy
+  `.env.example` to `.env` and edit the copy.
+- Both ports are published on `127.0.0.1` only: the API on 8080, PostgreSQL on 5433. If the
+  start fails with "port is already allocated" or "address already in use", another program
+  holds one of them: set `API_PORT` or `DB_PORT` in `.env`.
+- If `migrate` fails with "password authentication failed", the database volume was created
+  with a different password. `docker compose down --volumes` removes it.
+- The stack runs in the `Development` environment, which is what adds the demo catalog. The
+  image itself names no environment, so anywhere else it runs as `Production`.
+- The database password in `compose.yaml` is a throwaway for a database only this machine can
+  reach.
+- On the very first start PostgreSQL logs one error about a missing `__EFMigrationsHistory`
+  table. That is the migration tool finding out that the database is new.
+- The API container runs as an unprivileged user.
+
+Logs are human-readable in the `Development` environment and structured JSON, one object per
+line, in every other environment.
+
+## Develop without the API container
+
+Prerequisite: the [.NET 10 SDK](https://dotnet.microsoft.com/download/dotnet/10.0), version
+10.0.100 or later. Start only the database from Compose, then run the API from source:
+
+```bash
+docker compose up --detach --wait db
 dotnet run --project src/Carts.Api -- --migrate
 dotnet run --project src/Carts.Api
 ```
 
-The API listens on <http://localhost:5080>.
-
-```bash
-curl -i http://localhost:5080/health/live     # 200 Healthy: the process responds
-curl -i http://localhost:5080/health/ready    # 200 Healthy: the database answers and is migrated; 503 otherwise
-```
-
-Remove the database when done: `docker rm -f carts-db`.
-
-Logs are human-readable in the `Development` environment and structured JSON, one object per
-line, in every other environment.
+Run this way the API listens on <http://localhost:5080> and uses the connection string in
+`appsettings.Development.json`, which points at the Compose database on its default port and
+password. If you changed either in `.env`, set `ConnectionStrings__Carts` to match.
 
 ## Database
 
@@ -63,7 +96,7 @@ line, in every other environment.
   connections of its own, however often the endpoint is called. Its answer is only `Healthy`
   or `Unhealthy`; the reason goes to the log. Both health endpoints answer `GET` only.
 - The connection string is `ConnectionStrings__Carts`. The API refuses to start without it.
-  Only the `Development` environment has a default, pointing at the container above. Outside
+  Only the `Development` environment has a default, pointing at the Compose database. Outside
   a local machine it should demand an encrypted, verified connection (`SSL Mode=VerifyFull`).
 - A failed SQL statement is not logged a second time by the database layer: the error that
   results from it is logged where it is handled.
@@ -79,6 +112,8 @@ A test fails when the model and the migrations disagree.
 
 ## Test
 
+Prerequisites: the .NET 10 SDK and a running Docker.
+
 ```bash
 dotnet test
 ```
@@ -86,6 +121,7 @@ dotnet test
 - `tests/Carts.UnitTests` covers the cart's rules. It needs no database and no Docker.
 - `tests/Carts.IntegrationTests` runs against a real PostgreSQL that the tests start in Docker
   themselves ([Testcontainers](https://dotnet.testcontainers.org/)). Docker must be running.
+  They do not use the Compose stack and do not need it.
 
 With Docker Desktop nothing else is needed. With Colima, point Testcontainers at its socket:
 
@@ -123,6 +159,9 @@ dotnet format --no-restore --verify-no-changes      # formatting and style follo
 dotnet test --no-build --configuration Release
 ```
 
+A second CI job starts the Compose stack from nothing and checks that the API becomes ready
+and the demo catalog is there.
+
 In CI warnings are errors, including NuGet's warning about a package with a known
 vulnerability. The one exception is being unable to reach the advisory database, which only
 warns. On any other machine warnings stay warnings, so a newer SDK or a newly published
@@ -136,6 +175,9 @@ $env:CI = 'true'; dotnet build --no-incremental        # PowerShell
 ## Layout
 
 ```text
+Dockerfile                     the API image: build stage and runtime stage
+compose.yaml                   the local stack: database, migrate step, API
+.env.example                   the optional settings of the local stack
 docs/architecture.md           platform design
 src/Carts.Domain/              cart rules; no package references
 src/Carts.Api/                 ASP.NET Core minimal API

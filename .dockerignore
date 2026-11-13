@@ -1,0 +1,13 @@
+# Nothing reaches the image build except what is listed here.
+*
+!global.json
+!nuget.config
+!Directory.Build.props
+!Directory.Packages.props
+!src/
+
+# Build output and editor files inside src/ stay out as well.
+**/bin/
+**/obj/
+**/.DS_Store
+**/*.user

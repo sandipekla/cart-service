@@ -4,6 +4,8 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <AnalysisLevel>10.0-recommended</AnalysisLevel>
+    <!-- No culture data anywhere: the code behaves the same on a laptop and in the Alpine image. -->
+    <InvariantGlobalization>true</InvariantGlobalization>
     <!--
       Warnings fail the restore and the build in CI (GitHub Actions sets CI=true). That
       includes NuGet's audit of packages with known vulnerabilities (NU1901-NU1904). On any

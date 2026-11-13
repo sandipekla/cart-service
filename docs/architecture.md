@@ -569,10 +569,10 @@ below is kept in step with the code and says what exists today.
 | Capability | Status |
 |---|---|
 | Solution skeleton, liveness endpoint (`/health/live`), structured JSON logs | Implemented |
-| CI workflow: warnings are errors, including packages with a known vulnerability; format check; tests | Implemented |
+| CI workflow: warnings are errors, including packages with a known vulnerability; format check; tests; the Compose stack started from nothing | Implemented |
 | Cart rules: quantity and line limits, one currency per cart, price snapshot | Implemented, with unit tests |
 | PostgreSQL persistence with EF Core migrations; a migrate step separate from serving; readiness endpoint (`/health/ready`) | Implemented, with tests on a real PostgreSQL |
-| Dockerfile and Docker Compose: database, migrations, demo data, API | Planned in this repository |
+| Dockerfile (multi-stage, unprivileged user) and Docker Compose: database, migrate step with demo data, API, health checks, persistent volume | Implemented; CI starts the stack from nothing |
 | JWT bearer authentication; development-only token endpoint; cart resolved from the token | Planned in this repository |
 | Four cart endpoints with validation and Problem Details errors | Planned in this repository |
 | Safe concurrent updates: writes on one cart serialised by a database lock | Planned in this repository |

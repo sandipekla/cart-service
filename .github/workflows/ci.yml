@@ -41,3 +41,42 @@ jobs:
 
       - name: Test
         run: dotnet test --no-build --configuration Release
+
+  container:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Start the stack from nothing
+        run: docker compose up --build --wait
+
+      - name: Check that the API is ready and the demo catalog is there
+        run: |
+          curl --fail --silent --show-error http://localhost:8080/health/ready
+          products="$(docker compose exec -T db psql --username carts --dbname carts --tuples-only --no-align --command 'select count(*) from products')"
+          echo "products in the database: $products"
+          test "$products" -gt 0
+
+      - name: Stop it, start it again, and check it is the same database
+        run: |
+          database_id() {
+            docker compose exec -T db psql --username carts --dbname carts --tuples-only --no-align --command 'select system_identifier from pg_control_system()'
+          }
+          before="$(database_id)"
+          docker compose down
+          docker compose up --wait
+          curl --fail --silent --show-error http://localhost:8080/health/ready
+          after="$(database_id)"
+          echo "database before: $before, after: $after"
+          test -n "$before" && test "$before" = "$after"
+
+      - name: Show the logs if anything failed
+        if: failure()
+        run: docker compose logs --no-color
+
+      - name: Stop the stack
+        if: always()
+        run: docker compose down --volumes
