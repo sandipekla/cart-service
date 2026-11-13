@@ -1,0 +1,21 @@
+# Build output
+bin/
+obj/
+artifacts/
+publish/
+TestResults/
+
+# IDE and OS files
+.vs/
+.vscode/
+.idea/
+*.user
+.DS_Store
+
+# Local environment files, keys and certificates: never committed
+.env
+.env.*
+!.env.example
+*.pem
+*.pfx
+*.key
