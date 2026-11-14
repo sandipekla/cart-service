@@ -1,3 +1,4 @@
+using System.Data;
 using Carts.Api.Persistence;
 using Carts.Api.Products;
 using Carts.Domain;
@@ -83,7 +84,9 @@ public sealed partial class CartService(
         try
         {
             // Ending the transaction, by commit or by leaving this block, releases the lock.
-            await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+            // Read committed, said out loud: the read after the lock must see what the change
+            // before it stored, whatever isolation level the database defaults to.
+            await using var transaction = await db.Database.BeginTransactionAsync(IsolationLevel.ReadCommitted, cancellationToken);
             await db.LockCartAsync(userId, lockTimeout, cancellationToken);
 
             var cart = await db.FindCartAsync(userId, cancellationToken);

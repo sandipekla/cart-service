@@ -49,8 +49,8 @@ curl -X POST http://localhost:8080/dev/token \
 ```
 
 `userId` is required: 1 to 64 letters, digits, dots, underscores or hyphens. Anything else is
-a `400` with an `errors.userId` entry. The answer carries `Cache-Control: no-store`, because it
-is a credential.
+a `400` with an `errors.userId` entry and no `code`. The answer carries
+`Cache-Control: no-store`, because it is a credential.
 
 ## Cart
 
@@ -216,11 +216,13 @@ carries a stack trace or an internal message.
 The format assumes a client that accepts JSON, which is what an `Accept` header of `*/*`, or
 none at all, means. A client that says it accepts only something else, `text/html` for
 example, still gets the right status, but the errors raised by the framework arrive as a short
-plain-text line, and the cart's own errors arrive without the `traceId`.
+plain-text line (a `500` then has no body at all), and the cart's own errors arrive without
+the `traceId`.
 
 ```http
 HTTP/1.1 401 Unauthorized
 Content-Type: application/problem+json
+Cache-Control: no-store
 WWW-Authenticate: Bearer
 
 {"type":"https://tools.ietf.org/html/rfc9110#section-15.5.2","title":"Unauthorized","status":401,"traceId":"00-15d44312655bec2d3987d55334a699df-288321a05710720e-00"}

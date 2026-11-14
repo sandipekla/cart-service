@@ -19,7 +19,7 @@ public class CartConcurrencyTests(PostgresFixture postgres)
     private const string CartPath = "/api/v1/cart";
 
     /// <summary>Long enough that a slow machine never turns a waiting request into a busy one.</summary>
-    private static readonly Dictionary<string, string?> PatientLock = new() { ["Cart:LockTimeoutMs"] = "30000" };
+    private static readonly Dictionary<string, string?> PatientLock = new() { ["Cart:LockTimeoutMs"] = "20000" };
 
     private static readonly Dictionary<string, string?> ImpatientLock = new() { ["Cart:LockTimeoutMs"] = "200" };
 
@@ -415,7 +415,7 @@ public class CartConcurrencyTests(PostgresFixture postgres)
     [Theory]
     [InlineData("0")]
     [InlineData("-1")]
-    [InlineData("60001")]
+    [InlineData("20001")]
     public void The_api_does_not_start_with_a_lock_timeout_outside_its_range(string value)
     {
         using var factory = new CartApiFactory(postgres.ConnectionString, settings: new Dictionary<string, string?> { ["Cart:LockTimeoutMs"] = value });

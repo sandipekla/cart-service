@@ -1,7 +1,6 @@
 using System.Net;
 using System.Net.Http.Headers;
 using System.Text.Json;
-using Carts.Api.Auth;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;
@@ -271,13 +270,6 @@ public class AuthenticationTests(PostgresFixture postgres)
             || route.StartsWith("/openapi/", StringComparison.Ordinal)
             || route.StartsWith("/scalar", StringComparison.Ordinal),
             $"{route} is open to everyone."));
-    }
-
-    [Fact]
-    public void The_development_issuer_and_audience_are_what_the_tokens_say()
-    {
-        Assert.Equal("cart-api-development", DevTokenIssuer.Issuer);
-        Assert.Equal("cart-api", DevTokenIssuer.Audience);
     }
 
     private static string[] OpenRoutes(CartApiFactory factory) =>

@@ -4,10 +4,10 @@ High-level design for a global online retail platform that sells through a web s
 apps, marketplaces and B2B integrations, built and run by two cross-functional teams.
 
 **What is real and what is a proposal.** This document describes the whole platform. This
-repository implements only one part of it, the Cart API, and builds it in small steps.
-[Section 11](#11-implemented-in-this-repository-versus-proposed) lists exactly what exists
-today. Numbers in this document are planning estimates unless they say "measured". Nothing
-here has been load-tested.
+repository implements only one part of it, the Cart API.
+[Section 11](#11-implemented-in-this-repository-versus-proposed) lists exactly what exists.
+Numbers in this document are planning estimates unless they say "measured". Nothing here has
+been load-tested.
 
 | Requirement | Section |
 |---|---|
@@ -583,7 +583,8 @@ below is kept in step with the code and says what exists today.
 | Rate limiting, OpenTelemetry traces and metrics | Proposed only |
 
 **Everything else in this document is proposed only:** the Catalog and Order services, both
-workers, the gateway, Kafka, Redis, the search engine, the identity provider integration,
-payments, the tax authority and other adapters, the deployment platform, dashboards and
+workers, the gateway, Kafka, Redis, the search engine, the identity provider itself (the
+Cart API validates tokens from a configured one; none is deployed), payments, the tax
+authority and other adapters, the deployment platform, dashboards and
 alerts. "Real-time processing" in particular is design only: this repository publishes no
 events.

@@ -4,11 +4,10 @@ A minimal Cart Web API for a retail platform, built with ASP.NET Core on .NET 10
 platform design it belongs to is in [docs/architecture.md](docs/architecture.md); this
 repository implements one service of it.
 
-> **Status: work in progress.** The repository is built in small steps and this README only
-> describes what exists. So far: the architecture document, the cart's business rules, the
-> PostgreSQL schema with its migration, a one-command Docker setup, token authentication, the
-> four cart endpoints and safe concurrent updates. What is left is a final pass over the
-> documentation; section 11 of the architecture document tracks what is implemented.
+What is here: the four cart endpoints with validation, token authentication, safe concurrent
+updates, PostgreSQL with migrations, tests against a real database, a one-command Docker
+setup and CI. The rest of the platform is designed in the architecture document and not
+built; see [Not built](#not-built).
 
 The API contract, with examples, is in [docs/api.md](docs/api.md).
 
@@ -20,6 +19,10 @@ Compose plugin).
 ```bash
 docker compose up --build
 ```
+
+The command stays in the foreground and shows the logs, so run the commands further down in
+a second terminal. `docker compose up --build --wait` starts the same stack in the
+background and returns once the API is healthy.
 
 This starts three containers:
 
@@ -61,27 +64,42 @@ CART=http://localhost:8080/api/v1/cart
 AUTH="Authorization: Bearer $TOKEN"
 JSON='Content-Type: application/json'
 
-curl -i $CART -H "$AUTH"                                                        # 200, the empty cart
-curl -i -X PUT $CART/items/TSHIRT-BLK-M -H "$AUTH" -H "$JSON" -d '{"quantity":2}'  # 200, one line
-curl -i -X PUT $CART/items/MUG-WHT -H "$AUTH" -H "$JSON" -d '{"quantity":1}'       # 200, two lines
-curl -i -X PUT $CART/items/POSTER-2019 -H "$AUTH" -H "$JSON" -d '{"quantity":1}'   # 422, no longer sold
-curl -i -X PUT $CART/items/MUG-WHT -H "$AUTH" -H "$JSON" -d '{"quantity":0}'       # 400, quantity out of range
-curl -i -X DELETE $CART/items/MUG-WHT -H "$AUTH"                                # 200, one line again
-curl -i -X DELETE $CART -H "$AUTH"                                              # 200, empty
-curl -i $CART                                                                   # 401, no token
+curl -i $CART -H "$AUTH"
+curl -i -X PUT $CART/items/TSHIRT-BLK-M -H "$AUTH" -H "$JSON" -d '{"quantity":2}'
+curl -i -X PUT $CART/items/MUG-WHT -H "$AUTH" -H "$JSON" -d '{"quantity":1}'
+curl -i -X PUT $CART/items/POSTER-2019 -H "$AUTH" -H "$JSON" -d '{"quantity":1}'
+curl -i -X PUT $CART/items/MUG-WHT -H "$AUTH" -H "$JSON" -d '{"quantity":0}'
+curl -i -X DELETE $CART/items/MUG-WHT -H "$AUTH"
+curl -i -X DELETE $CART -H "$AUTH"
+curl -i $CART
 
-curl -i http://localhost:8080/health/live     # 200 Healthy: the process responds
-curl -i http://localhost:8080/health/ready    # 200 Healthy: the database answers and is migrated; 503 otherwise
+curl -i http://localhost:8080/health/live
+curl -i http://localhost:8080/health/ready
 ```
 
-In Windows PowerShell use `curl.exe`, because `curl` alone is an alias for another command.
+The answers, in order:
+
+| Request | Answer |
+|---|---|
+| `GET` the cart | `200`, the empty cart |
+| `PUT` `TSHIRT-BLK-M`, quantity 2 | `200`, one line |
+| `PUT` `MUG-WHT`, quantity 1 | `200`, two lines |
+| `PUT` `POSTER-2019`, quantity 1 | `422`, no longer sold |
+| `PUT` `MUG-WHT`, quantity 0 | `400`, quantity out of range |
+| `DELETE` `MUG-WHT` | `200`, one line again |
+| `DELETE` the cart | `200`, empty |
+| `GET` the cart without a token | `401` |
+| `GET /health/live` | `200 Healthy`: the process responds |
+| `GET /health/ready` | `200 Healthy`: the database answers and is migrated; `503` otherwise |
+
+The block is written for bash and zsh. On Windows use Git Bash or WSL, or the browser page
+above.
 
 Stopping and resetting:
 
-```bash
-docker compose down              # stop; the database keeps its data
-docker compose down --volumes    # stop and delete the data, so the next start begins from nothing
-```
+- `docker compose down` stops the stack; the database keeps its data.
+- `docker compose down --volumes` also deletes the data, so the next start begins from
+  nothing.
 
 Things to know:
 
@@ -125,7 +143,7 @@ password. If you changed either in `.env`, set `ConnectionStrings__Carts` to mat
 - Every cart endpoint needs a bearer token. The cart is found from the token's `sub` claim;
   no address, query or body can name a user or a cart, so one user cannot reach another's.
 - In `Development`, `POST /dev/token` issues a token for any user id. Its signing key is made
-  up when the API starts and exists only in memory, so there is no development secret in the
+  up when the API starts and exists only in memory, so there is no signing key in the
   repository, in configuration or in the image. A restart invalidates earlier tokens.
 - In every other environment tokens come from an OpenID Connect provider: set
   `Auth__Authority` (an `https` address) and `Auth__Audience`. The API refuses to start
@@ -251,7 +269,7 @@ COMMIT;                                                        -- releases the l
   few milliseconds, which is harmless.
 - A product that does not exist is answered before the lock is taken.
 
-A change that waits longer than `Cart__LockTimeoutMs` (default `2000`, allowed 1 to 60000)
+A change that waits longer than `Cart__LockTimeoutMs` (default `2000`, allowed 1 to 20000)
 gives up with `409 cart_busy` and `Retry-After: 1`. Nothing was changed, and sending the
 request again is safe. The timeout covers every lock the change waits for: the cart lock,
 and a row or a table that something else holds, such as a schema change in progress.
@@ -336,6 +354,27 @@ tested without a database or a web server.
 - Every change that alters the cart increases its version by one. A refused or repeated
   command leaves the cart exactly as it was.
 
+## Not built
+
+This repository is deliberately one small service. The following are not in the code. Most
+are designed in [docs/architecture.md](docs/architecture.md) or named there as later work;
+the rest are deliberate omissions:
+
+- The other services of the platform (catalog, orders), the gateway, and what connects them:
+  Kafka, the outbox and `cart.changed` events, Redis, the search engine. This service
+  publishes no events. Its `products` table stands in for the copy of product data that the
+  catalog's events would keep up to date; here only the demo catalog fills it.
+- Checkout, payments and stock. A cart holds what the user wants; it reserves nothing.
+- Guest carts, merging a guest cart at login, and cart expiry.
+- Conditional requests (`ETag`, `If-Match`); see [Concurrency](#concurrency).
+- Rate limiting, traces and metrics. Logs and the two health endpoints are what there is.
+- Kubernetes manifests, or any deployment beyond the Compose stack.
+- An identity provider. Outside `Development` the API validates tokens from the one it is
+  configured with; it does not ship one.
+
+Section 11 of the architecture document lists, line by line, what is implemented and what is
+proposed.
+
 ## Build checks
 
 CI (`.github/workflows/ci.yml`) runs these on every push to `main` and on every pull request:
@@ -343,9 +382,11 @@ CI (`.github/workflows/ci.yml`) runs these on every push to `main` and on every 
 ```bash
 dotnet restore
 dotnet build --no-restore --configuration Release
-dotnet format --no-restore --verify-no-changes      # formatting and style follow .editorconfig
+dotnet format --no-restore --verify-no-changes
 dotnet test --no-build --configuration Release
 ```
+
+The format step checks formatting and style against `.editorconfig`.
 
 A second CI job starts the Compose stack from nothing and uses it the way a person would: it
 checks that the API becomes ready and the demo catalog is there, gets a token, puts items in a
@@ -358,9 +399,10 @@ warns. On any other machine warnings stay warnings, so a newer SDK or a newly pu
 advisory cannot break a fresh clone. To apply the CI rule locally, set `CI=true`:
 
 ```bash
-CI=true dotnet build --no-incremental                  # bash, zsh
-$env:CI = 'true'; dotnet build --no-incremental        # PowerShell
+CI=true dotnet build --no-incremental
 ```
+
+In PowerShell: `$env:CI = 'true'; dotnet build --no-incremental`.
 
 ## Layout
 
@@ -382,6 +424,8 @@ src/Carts.Api/                 ASP.NET Core minimal API
 tests/Carts.UnitTests/         unit tests for the cart rules
 tests/Carts.IntegrationTests/  tests against a real PostgreSQL
 .github/workflows/             CI
+Carts.slnx                     the solution: all four projects
+.editorconfig                  formatting and style rules
 Directory.Build.props          compiler settings shared by every project
 Directory.Packages.props       package versions, in one place
 dotnet-tools.json              the EF Core command-line tool, pinned
