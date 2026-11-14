@@ -70,7 +70,7 @@ static WebApplication BuildApp(string[] hostArgs)
     builder.Services.AddSingleton(TimeProvider.System);
     builder.Services.AddCartPersistence(builder.Configuration);
     builder.Services.AddCartAuth(builder.Configuration, builder.Environment);
-    builder.Services.AddScoped<CartService>();
+    builder.Services.AddCartFeature(builder.Configuration);
 
     if (builder.Environment.IsDevelopment())
     {

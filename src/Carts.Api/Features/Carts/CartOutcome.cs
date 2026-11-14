@@ -9,6 +9,12 @@ public enum CartFailure
     ProductUnavailable,
     CurrencyMismatch,
     ItemLimitExceeded,
+
+    /// <summary>Another change to the same cart did not finish in time. Trying again is safe.</summary>
+    CartBusy,
+
+    /// <summary>Something changed the cart without taking the cart lock. Refusing is the safe answer; the cause is a bug and is logged as one.</summary>
+    ConcurrencyConflict,
 }
 
 /// <summary>

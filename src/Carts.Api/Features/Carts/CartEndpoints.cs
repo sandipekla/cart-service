@@ -41,13 +41,16 @@ public static class CartEndpoints
         cart.MapPut("items/{sku}", SetItem)
             .WithSummary("Set the quantity of a product. It replaces the current quantity; it never adds to it.")
             .ProducesProblem(StatusCodes.Status404NotFound)
+            .ProducesProblem(StatusCodes.Status409Conflict)
             .ProducesProblem(StatusCodes.Status422UnprocessableEntity);
 
         cart.MapDelete("items/{sku}", RemoveItem)
-            .WithSummary("Remove a product. Removing one that is not in the cart changes nothing.");
+            .WithSummary("Remove a product. Removing one that is not in the cart changes nothing.")
+            .ProducesProblem(StatusCodes.Status409Conflict);
 
         cart.MapDelete(string.Empty, ClearCart)
-            .WithSummary("Remove every product. The cart itself stays.");
+            .WithSummary("Remove every product. The cart itself stays.")
+            .ProducesProblem(StatusCodes.Status409Conflict);
     }
 
     private static async Task<Ok<CartResponse>> GetCart(
@@ -61,6 +64,7 @@ public static class CartEndpoints
         SetItemRequest request,
         CurrentUser user,
         CartService carts,
+        HttpResponse response,
         CancellationToken cancellationToken)
     {
         // Both mistakes are reported together, and before the database is asked anything.
@@ -85,14 +89,15 @@ public static class CartEndpoints
         var outcome = await carts.SetItemAsync(user.Id, sku, quantity, cancellationToken);
 
         return outcome.Failure is { } failure
-            ? CartProblems.For(failure)
+            ? Refuse(failure, response)
             : TypedResults.Ok(CartResponse.From(outcome.Cart));
     }
 
-    private static async Task<Results<Ok<CartResponse>, ValidationProblem>> RemoveItem(
+    private static async Task<Results<Ok<CartResponse>, ValidationProblem, ProblemHttpResult>> RemoveItem(
         string sku,
         CurrentUser user,
         CartService carts,
+        HttpResponse response,
         CancellationToken cancellationToken)
     {
         if (!SkuFormat.IsValid(sku))
@@ -102,16 +107,32 @@ public static class CartEndpoints
 
         var outcome = await carts.RemoveItemAsync(user.Id, sku, cancellationToken);
 
-        return TypedResults.Ok(CartResponse.From(outcome.Cart));
+        return outcome.Failure is { } failure
+            ? Refuse(failure, response)
+            : TypedResults.Ok(CartResponse.From(outcome.Cart));
     }
 
-    private static async Task<Ok<CartResponse>> ClearCart(
+    private static async Task<Results<Ok<CartResponse>, ProblemHttpResult>> ClearCart(
         CurrentUser user,
         CartService carts,
+        HttpResponse response,
         CancellationToken cancellationToken)
     {
         var outcome = await carts.ClearAsync(user.Id, cancellationToken);
 
-        return TypedResults.Ok(CartResponse.From(outcome.Cart));
+        return outcome.Failure is { } failure
+            ? Refuse(failure, response)
+            : TypedResults.Ok(CartResponse.From(outcome.Cart));
+    }
+
+    /// <summary>A busy cart also says when trying again makes sense; a problem document has no place for a header.</summary>
+    private static ProblemHttpResult Refuse(CartFailure failure, HttpResponse response)
+    {
+        if (failure is CartFailure.CartBusy)
+        {
+            response.Headers.RetryAfter = CartProblems.RetryAfterSeconds;
+        }
+
+        return CartProblems.For(failure);
     }
 }

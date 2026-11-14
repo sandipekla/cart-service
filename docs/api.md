@@ -67,6 +67,30 @@ second request to see the result of a change.
 All four are safe to repeat: sending the same request again leaves the cart exactly as the
 first one left it.
 
+### Parallel requests
+
+Changes to one cart are applied one after the other, in the order they reach the database,
+even when they are sent at the same moment and handled by different instances of the API.
+Each starts from what the one before it stored, so parallel changes do not fail and do not
+overwrite each other: twenty parallel `PUT`s for twenty products all answer `200` and leave
+twenty lines. When two parallel `PUT`s set the same product to different quantities, both
+answer `200` and the one applied last stands.
+
+A change waits for the one before it for at most two seconds (the `Cart__LockTimeoutMs`
+setting). After that it answers `409 cart_busy` with a `Retry-After` header. Nothing was
+changed, and because every request is safe to repeat, the client can simply send it again.
+Reading a cart never waits for a change. Two seconds is the limit of that wait, not of the
+whole request: on a heavily loaded server the answer can take longer.
+
+```http
+HTTP/1.1 409 Conflict
+Content-Type: application/problem+json
+Cache-Control: no-store
+Retry-After: 1
+
+{"type":"https://tools.ietf.org/html/rfc9110#section-15.5.10","title":"Cart busy","status":409,"detail":"Another change to this cart is still in progress. Nothing was changed; try again.","code":"cart_busy","traceId":"00-2e05f82c20e0c46f46115001f416c591-3ccae227515d1226-00"}
+```
+
 Conditional request headers (`If-Match`, `If-None-Match`, `If-Unmodified-Since`) are not
 supported: the API ignores them and applies the request. The `version` in each answer is
 there for a client to notice that a cart changed, not to guard a write.
@@ -148,6 +172,9 @@ Cache-Control: no-store
 Both validation rules are checked before anything else, and both mistakes are reported at
 once. A request that is refused changes nothing.
 
+Every route that changes a cart (`PUT` and both `DELETE`s) can also answer `409`; see
+[Parallel requests](#parallel-requests).
+
 ### DELETE /api/v1/cart/items/{sku}
 
 Removes a product from the cart.
@@ -207,6 +234,8 @@ WWW-Authenticate: Bearer
 | `404` | `product_not_found` | The product to set does not exist |
 | `404` | none | No such address |
 | `405` | none | The address exists but not for this method; the `Allow` header lists the methods it has |
+| `409` | `cart_busy` | Another change to the same cart did not finish in time. Nothing was changed; send the request again after the number of seconds in `Retry-After` |
+| `409` | `concurrency_conflict` | The cart changed while the request was being applied. Nothing was changed; read the cart and send the request again. This is a safety net that a correct deployment never shows |
 | `413` | none | The request body is larger than 16 KB |
 | `415` | none | The request body is not sent as `application/json` |
 | `422` | `product_unavailable` | The product is no longer sold |

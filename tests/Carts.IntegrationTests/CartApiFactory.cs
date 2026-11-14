@@ -3,6 +3,7 @@ using System.Net.Http.Json;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
@@ -18,7 +19,8 @@ public sealed class CartApiFactory(
     string? authority = CartApiFactory.SomeAuthority,
     string? audience = "cart-api",
     IReadOnlyDictionary<string, string?>? settings = null,
-    HttpMessageHandler? identityProvider = null)
+    HttpMessageHandler? identityProvider = null,
+    TimeProvider? time = null)
     : WebApplicationFactory<Program>
 {
     /// <summary>An identity provider address that resolves nowhere. Enough to start; nothing is ever fetched from it successfully.</summary>
@@ -59,6 +61,12 @@ public sealed class CartApiFactory(
             builder.ConfigureServices(services => services.Configure<JwtBearerOptions>(
                 JwtBearerDefaults.AuthenticationScheme,
                 options => options.BackchannelHttpHandler = identityProvider));
+        }
+
+        if (time is not null)
+        {
+            // The clock is the one thing a test may swap inside the application.
+            builder.ConfigureTestServices(services => services.AddSingleton(time));
         }
 
         builder.ConfigureLogging(logging => logging.AddProvider(Logs));

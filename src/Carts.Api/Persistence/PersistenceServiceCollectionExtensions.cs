@@ -2,6 +2,7 @@ using System.Reflection;
 using Carts.Api.Health;
 using Carts.Api.Products;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.EntityFrameworkCore.Migrations;
 
 namespace Carts.Api.Persistence;
@@ -19,7 +20,11 @@ public static class PersistenceServiceCollectionExtensions
                 $"The connection string 'ConnectionStrings:{ConnectionStringName}' is not configured.");
         }
 
-        services.AddDbContext<CartDbContext>(options => options.UseNpgsql(connectionString));
+        // A failed query is logged where its error is handled, not here as well. Only this
+        // event is turned down: the category also carries warnings worth seeing.
+        services.AddDbContext<CartDbContext>(options => options
+            .UseNpgsql(connectionString)
+            .ConfigureWarnings(warnings => warnings.Log((CoreEventId.QueryIterationFailed, LogLevel.Debug))));
         services.AddScoped<ProductCatalog>();
 
         // The probe gives up by itself after a few seconds; this timeout is only a backstop.

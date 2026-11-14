@@ -12,6 +12,9 @@ internal static class CartProblems
     private const string CodeKey = "code";
     private const string ValidationFailed = "validation_failed";
 
+    /// <summary>The "Retry-After" of a busy cart, in seconds. Changes take milliseconds.</summary>
+    public const string RetryAfterSeconds = "1";
+
     public static readonly string SkuRule =
         $"1 to {CartLimits.MaxSkuLength} letters, digits, dots, underscores or hyphens, starting with a letter or a digit.";
 
@@ -43,6 +46,16 @@ internal static class CartProblems
             "item_limit_exceeded",
             "Too many different products",
             $"A cart holds at most {CartLimits.MaxItems} different products."),
+        CartFailure.CartBusy => Problem(
+            StatusCodes.Status409Conflict,
+            "cart_busy",
+            "Cart busy",
+            "Another change to this cart is still in progress. Nothing was changed; try again."),
+        CartFailure.ConcurrencyConflict => Problem(
+            StatusCodes.Status409Conflict,
+            "concurrency_conflict",
+            "Cart changed meanwhile",
+            "The cart changed while this request was being applied. Nothing was changed; read the cart and try again."),
         _ => throw new InvalidOperationException($"No problem is defined for {failure}."),
     };
 

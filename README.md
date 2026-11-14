@@ -6,9 +6,9 @@ repository implements one service of it.
 
 > **Status: work in progress.** The repository is built in small steps and this README only
 > describes what exists. So far: the architecture document, the cart's business rules, the
-> PostgreSQL schema with its migration, a one-command Docker setup, token authentication and
-> the four cart endpoints. Protection against two requests changing one cart at the same
-> moment is not here yet; section 11 of the architecture document tracks what is implemented.
+> PostgreSQL schema with its migration, a one-command Docker setup, token authentication, the
+> four cart endpoints and safe concurrent updates. What is left is a final pass over the
+> documentation; section 11 of the architecture document tracks what is implemented.
 
 The API contract, with examples, is in [docs/api.md](docs/api.md).
 
@@ -164,8 +164,8 @@ password. If you changed either in `.env`, set `ConnectionStrings__Carts` to mat
 - The connection string is `ConnectionStrings__Carts`. The API refuses to start without it.
   Only the `Development` environment has a default, pointing at the Compose database. Outside
   a local machine it should demand an encrypted, verified connection (`SSL Mode=VerifyFull`).
-- A failed SQL statement is not logged a second time by the database layer: the error that
-  results from it is logged where it is handled.
+- A failed SQL statement or a failed save is not logged a second time by the database layer:
+  the error that results from it is logged where it is handled.
 
 To add a migration after changing the model:
 
@@ -213,6 +213,110 @@ contract, with examples and every error, is in [docs/api.md](docs/api.md).
 - A broken cart rule is a `404` or `422` with a stable `code` a client can switch on.
 - A request that is refused, or that changes nothing, writes nothing.
 - Every change is logged with the cart id, its new version and the user id.
+- Parallel changes to one cart are applied one after the other; see the next section.
+
+## Concurrency
+
+The problem: one user changes one cart from two places at the same moment. Two browser tabs,
+a double click, a mobile client that sends a request again because the first answer was slow.
+Without protection both requests read the same cart and both write, and the slower one fails
+or overwrites the other.
+
+### What the API does
+
+Every change to a cart runs in one short database transaction, and the first thing that
+transaction does is take a lock that belongs to the user:
+
+```sql
+BEGIN;
+SELECT set_config('lock_timeout', '2000ms', true);             -- for this transaction only
+SELECT pg_advisory_xact_lock(hashtextextended(@user_id, 0));   -- wait for this user's lock
+-- read the cart, apply the change, store the result
+COMMIT;                                                        -- releases the lock
+```
+
+- Changes to one cart run one after the other, and each starts from what the one before it
+  stored. No client ever has to resolve a conflict: twenty parallel requests for twenty
+  products all answer `200`, and the cart ends with twenty lines and version 20.
+- The lock lives in PostgreSQL, not in the process, so it holds across any number of API
+  instances.
+- It is an advisory lock on a hash of the user id. It locks no row, so it also works for a
+  user who has no cart yet, which is exactly when two first requests would otherwise both
+  try to create one.
+- It is scoped to the transaction: it is released when the transaction ends, however it
+  ends, and it works behind a connection pooler in transaction mode.
+- Reading takes no lock. `GET` is one statement, so it sees the cart before a change or
+  after it, never half of it.
+- Different users do not wait for each other. Two user ids with the same hash would, for a
+  few milliseconds, which is harmless.
+- A product that does not exist is answered before the lock is taken.
+
+A change that waits longer than `Cart__LockTimeoutMs` (default `2000`, allowed 1 to 60000)
+gives up with `409 cart_busy` and `Retry-After: 1`. Nothing was changed, and sending the
+request again is safe. The timeout covers every lock the change waits for: the cart lock,
+and a row or a table that something else holds, such as a schema change in progress.
+
+### Set, not add
+
+`PUT /api/v1/cart/items/{sku}` carries the quantity the line should have, not an amount to
+add. "Set to 3" sent twice leaves 3; "add 3" sent twice would leave 6. That is what makes a
+retry or a double click harmless. When two parallel requests set the same line to different
+quantities, both succeed and the one applied last stands.
+
+### The safety net
+
+The lock is the mechanism; the database still checks. A cart's `version` is checked on every
+update, and unique keys allow one cart per user and one line per product. While every write
+takes the lock none of these can fire. If one does, some write path changed a cart without
+the lock: the request is refused with `409 concurrency_conflict`, nothing is overwritten, and
+the API logs it as an error, because it is a bug and not a busy moment.
+
+### The alternative not taken
+
+Optimistic concurrency alone: no lock, check the version when writing, and answer `409` (or
+retry on the server) when it changed. It turns parallel changes to different lines of one
+cart into errors every client has to handle, and a server-side retry loop ends up doing the
+same one-after-the-other work with more round trips. It also needs separate handling for two
+first requests creating the same cart. A cart change is small and the server always knows
+how to apply it, so waiting a few milliseconds is the simpler contract.
+
+Conditional requests (`ETag` and `If-Match`), for a client that wants to refuse to overwrite
+a change it has not seen, solve a different problem and are not built.
+
+### Known limits
+
+- A request that waits for the lock holds a database connection while it waits, up to the
+  timeout. While one user's lock is stuck, a burst of a hundred or more changes for that
+  user can occupy all of an instance's connection pool, which delays or fails every other
+  request on that instance, reads included. The fix is a rate limit per user, which is not
+  built.
+- The timeout bounds the wait for locks, not the whole request: under heavy load, waiting
+  for a free database connection comes on top.
+- Changes are ordered by when they reach the database, not by when the client sent them.
+- `updatedAt` comes from the clock of the instance that applied the change. `version` is the
+  reliable order of changes.
+
+### How it is tested
+
+`tests/Carts.IntegrationTests/CartConcurrencyTests.cs` runs against a real PostgreSQL. Its
+requests are truly parallel: every one is started before any is awaited, and all are released
+by one signal.
+
+- Twenty parallel sets of twenty products: all `200`, twenty lines, versions 1 to 20.
+- Ten parallel first requests of a new user: exactly one cart.
+- The same request ten times at once: one change, version 1.
+- Parallel sets of one line to 2 and to 5, for ten users at once: one line, the later value.
+- Parallel sets, removes and a clear: all `200`, and the stored cart is the one the last
+  answer showed.
+- The lock held by another connection past the timeout: `409 cart_busy` with `Retry-After`
+  on all three changing routes, and the cart unchanged. The same answer when it is the
+  cart's row or the whole table that is locked.
+- A request waits for the lock and succeeds once it is free. Reading, and another user's
+  change, do not wait.
+- A writer that ignores the lock, changing or creating the cart in the middle of a request:
+  `409 concurrency_conflict`, nothing overwritten, one error in the log.
+
+With the one call that takes the lock removed, all five parallel tests above fail.
 
 ## Cart rules
 

@@ -2,6 +2,8 @@ using Carts.Api.Persistence;
 using Carts.Api.Products;
 using Carts.Domain;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
+using Npgsql;
 
 namespace Carts.Api.Features.Carts;
 
@@ -10,9 +12,14 @@ public sealed partial class CartService(
     CartDbContext db,
     ProductCatalog products,
     TimeProvider time,
+    IOptions<CartOptions> options,
     ILogger<CartService> logger)
 {
-    /// <summary>The user's cart, or null when the user has none. Reading never creates one.</summary>
+    /// <summary>
+    /// The user's cart, or null when the user has none. Reading never creates one and never
+    /// waits for a change in progress: it is one statement, so it sees the cart either before
+    /// or after that change, never half of it.
+    /// </summary>
     public Task<Cart?> FindAsync(string userId, CancellationToken cancellationToken) =>
         db.Carts
             .AsNoTracking()
@@ -25,75 +32,129 @@ public sealed partial class CartService(
     /// </summary>
     public async Task<CartOutcome> SetItemAsync(string userId, string sku, int quantity, CancellationToken cancellationToken)
     {
+        // Looked up before the cart lock is taken: a product is not the user's data, and a
+        // request for one that does not exist should make nobody wait.
         var product = await products.FindAsync(sku, cancellationToken);
         if (product is null)
         {
             return CartOutcome.Refused(CartFailure.ProductNotFound);
         }
 
-        var cart = await db.FindCartAsync(userId, cancellationToken);
-
-        // The time of a change is read only once the cart is in hand, so a later change can
-        // never carry an earlier time than the one before it.
-        var now = time.GetUtcNow();
-        var isNew = cart is null;
-        cart ??= Cart.Create(userId, now);
-        var versionBefore = cart.Version;
-
-        if (cart.SetItem(product, quantity, now) is { } refusal)
-        {
-            return CartOutcome.Refused(ToFailure(refusal));
-        }
-
-        if (isNew)
-        {
-            db.Carts.Add(cart);
-        }
-
-        return await SaveIfChangedAsync(cart, versionBefore, cancellationToken);
+        return await ChangeAsync(userId, createIfMissing: true, (cart, now) => cart.SetItem(product, quantity, now), cancellationToken);
     }
 
     /// <summary>Removes a product from the user's cart. Nothing to remove is not an error.</summary>
-    public async Task<CartOutcome> RemoveItemAsync(string userId, string sku, CancellationToken cancellationToken)
-    {
-        var cart = await db.FindCartAsync(userId, cancellationToken);
-        if (cart is null)
-        {
-            return CartOutcome.Of(null);
-        }
-
-        var versionBefore = cart.Version;
-        cart.RemoveItem(sku, time.GetUtcNow());
-
-        return await SaveIfChangedAsync(cart, versionBefore, cancellationToken);
-    }
+    public Task<CartOutcome> RemoveItemAsync(string userId, string sku, CancellationToken cancellationToken) =>
+        ChangeAsync(
+            userId,
+            createIfMissing: false,
+            (cart, now) =>
+            {
+                cart.RemoveItem(sku, now);
+                return null;
+            },
+            cancellationToken);
 
     /// <summary>Empties the user's cart. The cart itself stays; a user without one still has none.</summary>
-    public async Task<CartOutcome> ClearAsync(string userId, CancellationToken cancellationToken)
+    public Task<CartOutcome> ClearAsync(string userId, CancellationToken cancellationToken) =>
+        ChangeAsync(
+            userId,
+            createIfMissing: false,
+            (cart, now) =>
+            {
+                cart.Clear(now);
+                return null;
+            },
+            cancellationToken);
+
+    /// <summary>
+    /// Every change to a cart goes through here: read the cart, apply the change, store the
+    /// result, all while holding the user's cart lock. Two changes to one cart therefore run
+    /// one after the other, and the second one starts from what the first one stored.
+    /// </summary>
+    private async Task<CartOutcome> ChangeAsync(
+        string userId,
+        bool createIfMissing,
+        Func<Cart, DateTimeOffset, CartError?> change,
+        CancellationToken cancellationToken)
     {
-        var cart = await db.FindCartAsync(userId, cancellationToken);
-        if (cart is null)
+        var lockTimeout = TimeSpan.FromMilliseconds(options.Value.LockTimeoutMs);
+
+        try
         {
-            return CartOutcome.Of(null);
+            // Ending the transaction, by commit or by leaving this block, releases the lock.
+            await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+            await db.LockCartAsync(userId, lockTimeout, cancellationToken);
+
+            var cart = await db.FindCartAsync(userId, cancellationToken);
+            if (cart is null && !createIfMissing)
+            {
+                return CartOutcome.Of(null);
+            }
+
+            // The time is read under the lock, so on one clock a later change never carries an earlier time.
+            var now = time.GetUtcNow();
+            var isNew = cart is null;
+            cart ??= Cart.Create(userId, now);
+            var versionBefore = cart.Version;
+
+            if (change(cart, now) is { } refusal)
+            {
+                return CartOutcome.Refused(ToFailure(refusal));
+            }
+
+            // The cart counts its own real changes; a command that changed nothing writes nothing.
+            if (cart.Version != versionBefore)
+            {
+                if (isNew)
+                {
+                    db.Carts.Add(cart);
+                }
+
+                await db.SaveChangesAsync(cancellationToken);
+                await transaction.CommitAsync(cancellationToken);
+                LogCartChanged(logger, cart.Id, cart.Version);
+            }
+
+            return CartOutcome.Of(cart);
         }
-
-        var versionBefore = cart.Version;
-        cart.Clear(time.GetUtcNow());
-
-        return await SaveIfChangedAsync(cart, versionBefore, cancellationToken);
+        catch (Exception exception) when (IsLockTimeout(exception))
+        {
+            LogCartBusy(logger, options.Value.LockTimeoutMs);
+            return CartOutcome.Refused(CartFailure.CartBusy);
+        }
+        catch (DbUpdateException exception) when (IsWriteAroundTheLock(exception))
+        {
+            LogWriteAroundTheLock(logger, exception);
+            return CartOutcome.Refused(CartFailure.ConcurrencyConflict);
+        }
     }
 
-    /// <summary>The cart counts its own real changes; a command that changed nothing writes nothing.</summary>
-    private async Task<CartOutcome> SaveIfChangedAsync(Cart cart, int versionBefore, CancellationToken cancellationToken)
+    /// <summary>
+    /// The lock timeout of the transaction ran out. It covers every wait of the change: for
+    /// the cart lock, and for a row or a table something else holds. The database layer
+    /// wraps the error when it comes from a query or a save, so the cause is searched for.
+    /// </summary>
+    private static bool IsLockTimeout(Exception? exception)
     {
-        if (cart.Version != versionBefore)
+        for (; exception is not null; exception = exception.InnerException)
         {
-            await db.SaveChangesAsync(cancellationToken);
-            LogCartChanged(logger, cart.Id, cart.Version);
+            if (exception is PostgresException { SqlState: PostgresErrorCodes.LockNotAvailable })
+            {
+                return true;
+            }
         }
 
-        return CartOutcome.Of(cart);
+        return false;
     }
+
+    /// <summary>
+    /// The cart's version or one of its unique keys caught a second writer. Under the lock
+    /// that cannot happen, so something changed the cart without taking it.
+    /// </summary>
+    private static bool IsWriteAroundTheLock(DbUpdateException exception) =>
+        exception is DbUpdateConcurrencyException
+        || exception.InnerException is PostgresException { SqlState: PostgresErrorCodes.UniqueViolation };
 
     private static CartFailure ToFailure(CartError error) => error switch
     {
@@ -107,4 +168,10 @@ public sealed partial class CartService(
 
     [LoggerMessage(Level = LogLevel.Information, Message = "Cart {CartId} changed to version {Version}.")]
     private static partial void LogCartChanged(ILogger logger, Guid cartId, int version);
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "A change gave up after waiting {LockTimeoutMs} ms for a lock on the cart.")]
+    private static partial void LogCartBusy(ILogger logger, int lockTimeoutMs);
+
+    [LoggerMessage(Level = LogLevel.Error, Message = "A cart was changed without the cart lock; this change was refused. Some write path does not take the lock.")]
+    private static partial void LogWriteAroundTheLock(ILogger logger, Exception exception);
 }
