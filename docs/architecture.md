@@ -240,9 +240,9 @@ other's tables. A worker is a second process of the service that owns the data i
 no cart id in any public URL and another user's cart cannot be addressed. Product names and
 prices come from the service's own `products` table. In the platform that table is keyed by
 SKU and market and fed from Catalog and Pricing events; the implementation in this repository
-fills it with demo data for a single market instead. A cart line's price is a display snapshot; the binding price is computed at checkout.
-Checkout reads a cart through an internal endpoint that needs a service token and is not
-routed by the gateway.
+fills it with demo data for a single market instead. A cart line's price is a display
+snapshot; the binding price is computed at checkout. Checkout reads a cart through an
+internal endpoint that needs a service token and is not routed by the gateway.
 
 ---
 
