@@ -14,9 +14,7 @@ public class ApiDocsTests(PostgresFixture postgres)
     [Theory]
     [InlineData("/openapi/v1.json")]
     [InlineData("/scalar")]
-    [InlineData("/health/live")]
-    [InlineData("/health/ready")]
-    public async Task In_development_the_documentation_and_the_health_endpoints_need_no_token(string path)
+    public async Task In_development_the_documentation_needs_no_token(string path)
     {
         await using var factory = new CartApiFactory(postgres.ConnectionString);
         using var client = factory.CreateClient();

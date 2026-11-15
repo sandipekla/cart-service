@@ -1,3 +1,4 @@
+using Carts.Api.Errors;
 using Carts.Domain;
 using Microsoft.AspNetCore.Http.HttpResults;
 
@@ -9,9 +10,6 @@ namespace Carts.Api.Features.Carts;
 /// </summary>
 internal static class CartProblems
 {
-    private const string CodeKey = "code";
-    private const string ValidationFailed = "validation_failed";
-
     /// <summary>The "Retry-After" of a busy cart, in seconds. Changes take milliseconds.</summary>
     public const string RetryAfterSeconds = "1";
 
@@ -22,7 +20,7 @@ internal static class CartProblems
         $"Required: a whole number from 1 to {CartLimits.MaxQuantity}.";
 
     public static ValidationProblem Validation(IDictionary<string, string[]> errors) =>
-        TypedResults.ValidationProblem(errors, extensions: Code(ValidationFailed));
+        TypedResults.ValidationProblem(errors, extensions: Code(ProblemDetailsDefaults.ValidationFailed));
 
     public static ProblemHttpResult For(CartFailure failure) => failure switch
     {
@@ -62,5 +60,5 @@ internal static class CartProblems
     private static ProblemHttpResult Problem(int status, string code, string title, string detail) =>
         TypedResults.Problem(detail, statusCode: status, title: title, extensions: Code(code));
 
-    private static Dictionary<string, object?> Code(string code) => new() { [CodeKey] = code };
+    private static Dictionary<string, object?> Code(string code) => new() { [ProblemDetailsDefaults.CodeKey] = code };
 }

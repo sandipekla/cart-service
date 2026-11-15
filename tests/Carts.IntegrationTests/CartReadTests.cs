@@ -1,4 +1,5 @@
 using System.Net;
+using System.Net.Http.Json;
 using System.Text.Json;
 using Carts.Domain;
 using Microsoft.EntityFrameworkCore;
@@ -129,14 +130,41 @@ public class CartReadTests(PostgresFixture postgres)
     }
 
     [Fact]
-    public async Task A_cart_answer_is_never_stored_by_a_cache()
+    public async Task Reading_a_cart_with_its_lines_is_one_sql_statement()
     {
+        // One statement sees the cart either before or after a change, never half of it; that
+        // is why reading needs no lock. The database layer's command log counts the statements.
+        var userId = TestData.NewUserId();
+        var cart = Cart.Create(userId, TestData.Now);
+        cart.SetItem(TestData.TShirt, 2, TestData.Now);
+        cart.SetItem(TestData.Mug, 1, TestData.Now);
+        await SaveAsync(cart);
+        await using var factory = new CartApiFactory(
+            postgres.ConnectionString,
+            settings: new Dictionary<string, string?> { ["Logging:LogLevel:Microsoft.EntityFrameworkCore.Database.Command"] = "Information" });
+        using var client = await factory.CreateClientForAsync(userId, Cancellation);
+
+        using var body = JsonDocument.Parse(await client.GetStringAsync(CartPath, Cancellation));
+
+        Assert.Equal(2, body.RootElement.GetProperty("items").GetArrayLength());
+        Assert.Single(factory.Logs.Entries, entry =>
+            entry.Category == "Microsoft.EntityFrameworkCore.Database.Command"
+            && entry.Message.StartsWith("Executed DbCommand", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task A_user_id_that_differs_only_in_case_is_another_user()
+    {
+        var sku = await TestCatalog.AddAsync(postgres);
+        var userId = TestData.NewUserId();
         await using var factory = new CartApiFactory(postgres.ConnectionString);
-        using var client = await factory.CreateClientForAsync(TestData.NewUserId(), Cancellation);
+        using var owner = await factory.CreateClientForAsync(userId, Cancellation);
+        using var lookalike = await factory.CreateClientForAsync(userId.ToUpperInvariant(), Cancellation);
+        await owner.PutAsJsonAsync($"{CartPath}/items/{sku}", new { quantity = 1 }, Cancellation);
 
-        var response = await client.GetAsync(CartPath, Cancellation);
+        using var body = JsonDocument.Parse(await lookalike.GetStringAsync(CartPath, Cancellation));
 
-        Assert.True(response.Headers.CacheControl?.NoStore);
+        Assert.Equal(JsonValueKind.Null, body.RootElement.GetProperty("id").ValueKind);
     }
 
     private async Task SaveAsync(Cart cart)

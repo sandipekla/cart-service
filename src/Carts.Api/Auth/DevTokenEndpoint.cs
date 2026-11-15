@@ -23,7 +23,7 @@ public static class DevTokenEndpoint
         {
             return TypedResults.ValidationProblem(new Dictionary<string, string[]>
             {
-                ["userId"] = [$"Required: 1 to {MaxDevUserIdLength} letters, digits, dots, underscores or hyphens."],
+                ["userId"] = [$"Required: 1 to {MaxDevUserIdLength} letters, digits, dots, underscores or hyphens, starting with a letter or a digit."],
             });
         }
 
@@ -36,9 +36,11 @@ public static class DevTokenEndpoint
             (int)DevTokenIssuer.Lifetime.TotalSeconds));
     }
 
+    // The same shape as a SKU: it starts with a letter or a digit.
     private static bool IsValidUserId([System.Diagnostics.CodeAnalysis.NotNullWhen(true)] string? userId) =>
         !string.IsNullOrEmpty(userId)
         && userId.Length <= MaxDevUserIdLength
+        && char.IsAsciiLetterOrDigit(userId[0])
         && userId.All(character => char.IsAsciiLetterOrDigit(character) || character is '.' or '_' or '-');
 }
 

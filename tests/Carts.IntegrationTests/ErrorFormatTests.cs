@@ -35,6 +35,26 @@ public class ErrorFormatTests(PostgresFixture postgres)
     }
 
     [Fact]
+    public async Task Every_answer_forbids_the_browser_to_guess_its_content_type()
+    {
+        await using var factory = new CartApiFactory(postgres.ConnectionString);
+        using var client = await factory.CreateClientForAsync(TestData.NewUserId(), Cancellation);
+        using var anonymous = factory.CreateClient();
+
+        var answers = new Dictionary<string, HttpResponseMessage>
+        {
+            ["200 cart"] = await client.GetAsync("/api/v1/cart", Cancellation),
+            ["401"] = await anonymous.GetAsync("/api/v1/cart", Cancellation),
+            ["404"] = await client.GetAsync("/api/v1/no-such-thing", Cancellation),
+            ["200 health"] = await anonymous.GetAsync("/health/live", Cancellation),
+        };
+
+        Assert.All(answers, answer => Assert.True(
+            answer.Value.Headers.TryGetValues("X-Content-Type-Options", out var values) && values.Single() == "nosniff",
+            $"{answer.Key} lets the browser guess."));
+    }
+
+    [Fact]
     public async Task A_failure_inside_the_api_answers_500_and_says_nothing_about_its_cause()
     {
         await using var factory = new CartApiFactory(RefusingDatabase);

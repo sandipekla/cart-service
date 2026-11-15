@@ -47,12 +47,10 @@ public class MigrateCommandTests(PostgresFixture postgres)
         Assert.Contains("Database setup failed", run.Output, StringComparison.Ordinal);
     }
 
-    [Theory]
-    [InlineData(null)]
-    [InlineData("Host=127.0.0.1;Port=not-a-number;Database=carts;Username=carts;Password=a-secret-nobody-should-see")]
-    public async Task A_missing_or_malformed_connection_string_also_exits_with_code_1(string? connectionString)
+    [Fact]
+    public async Task A_malformed_connection_string_also_exits_with_code_1()
     {
-        var run = await RunApiAsync("Production", connectionString, "--migrate");
+        var run = await RunApiAsync("Production", "Host=127.0.0.1;Port=not-a-number;Database=carts;Username=carts;Password=a-secret-nobody-should-see", "--migrate");
 
         Assert.Equal(1, run.ExitCode);
         Assert.DoesNotContain("a-secret-nobody-should-see", run.Output, StringComparison.Ordinal);

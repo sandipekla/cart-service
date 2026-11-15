@@ -48,8 +48,9 @@ curl -X POST http://localhost:8080/dev/token \
 {"accessToken":"<the token>","tokenType":"Bearer","expiresIn":3600}
 ```
 
-`userId` is required: 1 to 64 letters, digits, dots, underscores or hyphens. Anything else is
-a `400` with an `errors.userId` entry and no `code`. The answer carries
+`userId` is required: 1 to 64 letters, digits, dots, underscores or hyphens, starting with a
+letter or a digit. Anything else is `400 validation_failed` with an `errors.userId` entry. The
+answer carries
 `Cache-Control: no-store`, because it is a credential.
 
 ## Cart
@@ -162,7 +163,7 @@ Cache-Control: no-store
 
 | Rule | Value | When broken |
 |---|---|---|
-| `sku` | 1 to 64 letters, digits, dots, underscores or hyphens, starting with a letter or a digit | `400 validation_failed`, `errors.sku` |
+| `sku` | 1 to 64 letters, digits, dots, underscores or hyphens, starting with a letter or a digit. Compared case-sensitively: `mug-wht` is not `MUG-WHT` | `400 validation_failed`, `errors.sku` |
 | `quantity` | Required, a whole number from 1 to 99 | `400 validation_failed`, `errors.quantity` |
 | The product exists | | `404 product_not_found` |
 | The product is still sold | | `422 product_unavailable` |
@@ -208,10 +209,14 @@ created.
 
 ## Errors
 
-Every response that is not a success is a problem document
-([RFC 9457](https://www.rfc-editor.org/rfc/rfc9457)) with the media type
+Every response that is not a success, apart from the health endpoints' `503`, is a problem
+document ([RFC 9457](https://www.rfc-editor.org/rfc/rfc9457)) with the media type
 `application/problem+json`. That includes errors raised by the framework itself. No error ever
 carries a stack trace or an internal message.
+
+A client switches on the status, and on `code` where the table below has one. Every `400`
+has a `code`, because there are two kinds: a value that breaks a rule, and a body that cannot
+be read at all. The other statuses without a `code` mean one thing each.
 
 The format assumes a client that accepts JSON, which is what an `Accept` header of `*/*`, or
 none at all, means. A client that says it accepts only something else, `text/html` for
@@ -231,7 +236,7 @@ WWW-Authenticate: Bearer
 | Status | `code` | When |
 |---|---|---|
 | `400` | `validation_failed` | A value breaks a rule. The broken rules are listed by field under `errors` |
-| `400` | none | The body is missing, is not JSON, names a field twice, or has a value of the wrong type: a quantity in quotes, with a decimal point or an exponent (`"2"`, `2.0`, `1e1`), or too large to be a whole number |
+| `400` | `invalid_body` | The body is missing, is not JSON, names a field twice, or has a value of the wrong type: a quantity in quotes, with a decimal point or an exponent (`"2"`, `2.0`, `1e1`), or too large to be a whole number |
 | `401` | none | No valid token |
 | `404` | `product_not_found` | The product to set does not exist |
 | `404` | none | No such address |
@@ -273,7 +278,8 @@ Cache-Control: no-store
 ## Health
 
 Not part of the cart contract, and open without a token. Both answer `GET` only, with a plain
-text body of `Healthy` or `Unhealthy`.
+text body of `Healthy` or `Unhealthy`; a probe reads the status, not a problem document. They
+are meant for whatever runs the API, not for the internet: a gateway does not route them.
 
 | Endpoint | 200 means | Otherwise |
 |---|---|---|

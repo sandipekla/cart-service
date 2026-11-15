@@ -1,6 +1,7 @@
 using System.Text.Json.Serialization;
 using Carts.Api.ApiDocs;
 using Carts.Api.Auth;
+using Carts.Api.Errors;
 using Carts.Api.Features.Carts;
 using Carts.Api.Health;
 using Carts.Api.Json;
@@ -22,6 +23,13 @@ await using var app = BuildApp(hostArgs);
 // the framework itself: an unhandled exception, an unknown route, a missing token.
 app.UseExceptionHandler();
 app.UseStatusCodePages();
+
+// Every answer declares its content type; no browser may guess another one from the bytes.
+app.Use((context, next) =>
+{
+    context.Response.Headers.XContentTypeOptions = "nosniff";
+    return next(context);
+});
 
 app.UseNoStoreForCartAnswers();
 app.UseCartAuth();
@@ -55,7 +63,7 @@ static WebApplication BuildApp(string[] hostArgs)
     // default the framework throws instead in Development, which would surface as a 500.
     builder.Services.Configure<RouteHandlerOptions>(options => options.ThrowOnBadRequest = false);
 
-    builder.Services.AddProblemDetails();
+    builder.Services.AddProblemDetails(options => options.CustomizeProblemDetails = ProblemDetailsDefaults.Apply);
     builder.Services.AddExceptionHandler<FailedRequestLogger>();
     builder.Services.ConfigureHttpJsonOptions(options =>
     {

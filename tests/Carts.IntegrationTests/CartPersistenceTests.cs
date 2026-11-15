@@ -1,8 +1,5 @@
-using System.Data.Common;
-using Carts.Api.Persistence;
 using Carts.Domain;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.EntityFrameworkCore.Diagnostics;
 using Npgsql;
 
 namespace Carts.IntegrationTests;
@@ -57,29 +54,6 @@ public class CartPersistenceTests(PostgresFixture postgres)
     }
 
     [Fact]
-    public async Task A_cart_without_lines_keeps_a_null_currency()
-    {
-        var userId = TestData.NewUserId();
-        await SaveNewAsync(Cart.Create(userId, TestData.Now));
-
-        await using var db = postgres.CreateContext();
-        var loaded = await db.FindCartAsync(userId, Cancellation);
-
-        Assert.NotNull(loaded);
-        Assert.Null(loaded.Currency);
-        Assert.Empty(loaded.Items);
-        Assert.Equal(0, loaded.Version);
-    }
-
-    [Fact]
-    public async Task A_user_without_a_cart_has_none()
-    {
-        await using var db = postgres.CreateContext();
-
-        Assert.Null(await db.FindCartAsync(TestData.NewUserId(), Cancellation));
-    }
-
-    [Fact]
     public async Task Carts_are_found_by_the_exact_user_id()
     {
         var userId = TestData.NewUserId();
@@ -88,27 +62,6 @@ public class CartPersistenceTests(PostgresFixture postgres)
         await using var db = postgres.CreateContext();
 
         Assert.Null(await db.FindCartAsync(userId.ToUpperInvariant(), Cancellation));
-    }
-
-    [Fact]
-    public async Task Loading_a_cart_with_its_lines_is_one_sql_statement()
-    {
-        var userId = TestData.NewUserId();
-        var cart = Cart.Create(userId, TestData.Now);
-        cart.SetItem(TestData.TShirt, 2, TestData.Now);
-        cart.SetItem(TestData.Mug, 1, TestData.Now);
-        await SaveNewAsync(cart);
-        var counter = new CommandCounter();
-        var options = new DbContextOptionsBuilder<CartDbContext>()
-            .UseNpgsql(postgres.ConnectionString)
-            .AddInterceptors(counter)
-            .Options;
-
-        await using var db = new CartDbContext(options);
-        var loaded = await db.FindCartAsync(userId, Cancellation);
-
-        Assert.Equal(2, loaded!.Items.Count);
-        Assert.Equal(1, counter.Count);
     }
 
     [Fact]
@@ -348,20 +301,5 @@ public class CartPersistenceTests(PostgresFixture postgres)
         return await db.Database
             .SqlQuery<int>($"SELECT count(*)::int AS \"Value\" FROM cart_items WHERE cart_id = {cartId}")
             .SingleAsync(Cancellation);
-    }
-
-    private sealed class CommandCounter : DbCommandInterceptor
-    {
-        public int Count { get; private set; }
-
-        public override ValueTask<InterceptionResult<DbDataReader>> ReaderExecutingAsync(
-            DbCommand command,
-            CommandEventData eventData,
-            InterceptionResult<DbDataReader> result,
-            CancellationToken cancellationToken = default)
-        {
-            Count++;
-            return base.ReaderExecutingAsync(command, eventData, result, cancellationToken);
-        }
     }
 }

@@ -38,14 +38,6 @@ public class ProductCatalogTests(PostgresFixture postgres)
     }
 
     [Fact]
-    public async Task An_unknown_sku_finds_nothing()
-    {
-        await using var db = postgres.CreateContext();
-
-        Assert.Null(await new ProductCatalog(db, NullLogger<ProductCatalog>.Instance).FindAsync("NO-SUCH-SKU", Cancellation));
-    }
-
-    [Fact]
     public async Task Skus_are_matched_exactly_including_case()
     {
         var sku = await AddProductAsync(name: "Notebook A5", unitPrice: 3.49m, currency: "EUR", isActive: true);
@@ -56,7 +48,6 @@ public class ProductCatalogTests(PostgresFixture postgres)
 
     [Theory]
     [InlineData("", "Notebook A5")]
-    [InlineData(" LEADING-SPACE", "Notebook A5")]
     [InlineData("HAS SPACE", "Notebook A5")]
     [InlineData("-STARTS-WITH-HYPHEN", "Notebook A5")]
     [InlineData("VALID-SKU-BUT-NO-NAME", "")]

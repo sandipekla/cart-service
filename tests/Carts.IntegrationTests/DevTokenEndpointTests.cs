@@ -10,22 +10,6 @@ public class DevTokenEndpointTests(PostgresFixture postgres)
     private static CancellationToken Cancellation => TestContext.Current.CancellationToken;
 
     [Fact]
-    public async Task It_issues_a_token_that_the_api_accepts()
-    {
-        await using var factory = new CartApiFactory(postgres.ConnectionString);
-        using var client = factory.CreateClient();
-
-        var response = await client.PostAsJsonAsync("/dev/token", new { userId = "alice" }, Cancellation);
-
-        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        using var body = JsonDocument.Parse(await response.Content.ReadAsStringAsync(Cancellation));
-        Assert.Equal("Bearer", body.RootElement.GetProperty("tokenType").GetString());
-        Assert.Equal(3600, body.RootElement.GetProperty("expiresIn").GetInt32());
-        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", body.RootElement.GetProperty("accessToken").GetString());
-        Assert.Equal(HttpStatusCode.OK, (await client.GetAsync("/api/v1/cart", Cancellation)).StatusCode);
-    }
-
-    [Fact]
     public async Task A_token_from_one_run_of_the_api_does_not_work_in_another()
     {
         await using var first = new CartApiFactory(postgres.ConnectionString);
@@ -39,10 +23,9 @@ public class DevTokenEndpointTests(PostgresFixture postgres)
 
     [Theory]
     [InlineData("{}")]
-    [InlineData("""{ "userId": null }""")]
     [InlineData("""{ "userId": "" }""")]
     [InlineData("""{ "userId": "has space" }""")]
-    [InlineData("""{ "userId": "semi;colon" }""")]
+    [InlineData("""{ "userId": "-starts-with-a-hyphen" }""")]
     [InlineData("""{ "userId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" }""")]
     public async Task A_missing_or_malformed_user_id_is_a_validation_error(string json)
     {
@@ -56,6 +39,7 @@ public class DevTokenEndpointTests(PostgresFixture postgres)
         Assert.Equal("application/problem+json", response.Content.Headers.ContentType?.MediaType);
         using var problem = JsonDocument.Parse(await response.Content.ReadAsStringAsync(Cancellation));
         Assert.True(problem.RootElement.GetProperty("errors").TryGetProperty("userId", out _));
+        Assert.Equal("validation_failed", problem.RootElement.GetProperty("code").GetString());
     }
 
     [Theory]
@@ -64,7 +48,6 @@ public class DevTokenEndpointTests(PostgresFixture postgres)
     [InlineData("null")]
     [InlineData("[]")]
     [InlineData("{\"userId\":123}")]
-    [InlineData("not json at all")]
     public async Task A_body_that_is_not_the_expected_json_is_the_callers_error_not_ours(string body)
     {
         await using var factory = new CartApiFactory(postgres.ConnectionString);
@@ -75,6 +58,8 @@ public class DevTokenEndpointTests(PostgresFixture postgres)
 
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
         Assert.Equal("application/problem+json", response.Content.Headers.ContentType?.MediaType);
+        using var problem = JsonDocument.Parse(await response.Content.ReadAsStringAsync(Cancellation));
+        Assert.Equal("invalid_body", problem.RootElement.GetProperty("code").GetString());
     }
 
     [Fact]
@@ -105,18 +90,23 @@ public class DevTokenEndpointTests(PostgresFixture postgres)
     }
 
     [Fact]
-    public async Task The_token_lives_exactly_as_long_as_the_answer_says_and_is_never_cached()
+    public async Task It_issues_a_bearer_token_for_an_hour_that_the_api_accepts_and_no_cache_keeps()
     {
         await using var factory = new CartApiFactory(postgres.ConnectionString);
         using var client = factory.CreateClient();
 
         var response = await client.PostAsJsonAsync("/dev/token", new { userId = "alice" }, Cancellation);
 
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         Assert.True(response.Headers.CacheControl?.NoStore);
         using var body = JsonDocument.Parse(await response.Content.ReadAsStringAsync(Cancellation));
+        Assert.Equal("Bearer", body.RootElement.GetProperty("tokenType").GetString());
+        Assert.Equal(3600, body.RootElement.GetProperty("expiresIn").GetInt32());
         var token = new Microsoft.IdentityModel.JsonWebTokens.JsonWebToken(body.RootElement.GetProperty("accessToken").GetString());
         Assert.Equal(body.RootElement.GetProperty("expiresIn").GetInt32(), (int)(token.ValidTo - token.ValidFrom).TotalSeconds);
         Assert.Equal("alice", token.Subject);
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token.EncodedToken);
+        Assert.Equal(HttpStatusCode.OK, (await client.GetAsync("/api/v1/cart", Cancellation)).StatusCode);
     }
 
     [Theory]

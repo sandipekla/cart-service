@@ -166,17 +166,24 @@ public class HealthEndpointTests(PostgresFixture postgres)
         return (long)(await command.ExecuteScalarAsync(Cancellation))!;
     }
 
-    /// <summary>The first probe opens a cold connection, which a busy machine can make slow. Readiness is allowed to say "not yet".</summary>
+    /// <summary>
+    /// The first probe opens a cold connection, which a busy machine can make slower than the
+    /// probe's two seconds. Readiness may say "not yet" once or twice, half a second apart; a
+    /// probe that never succeeds still fails the test.
+    /// </summary>
     private static async Task<HttpStatusCode> ReadyStatusOnceWarmAsync(HttpClient client)
     {
-        var deadline = Stopwatch.StartNew();
-        while (true)
+        var status = HttpStatusCode.ServiceUnavailable;
+        for (var attempt = 0; attempt < 3 && status != HttpStatusCode.OK; attempt++)
         {
-            var status = (await client.GetAsync("/health/ready", Cancellation)).StatusCode;
-            if (status == HttpStatusCode.OK || deadline.Elapsed > TimeSpan.FromSeconds(30))
+            if (attempt > 0)
             {
-                return status;
+                await Task.Delay(TimeSpan.FromMilliseconds(500), Cancellation);
             }
+
+            status = (await client.GetAsync("/health/ready", Cancellation)).StatusCode;
         }
+
+        return status;
     }
 }

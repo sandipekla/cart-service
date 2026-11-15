@@ -33,7 +33,8 @@ public sealed record CartItemResponse(string Sku, string Name, decimal UnitPrice
 
 /// <summary>
 /// The body of "set this item". It carries a quantity and nothing else: the product's name
-/// and price always come from the service's own data, never from the caller.
+/// and price always come from the service's own data, never from the caller. The range
+/// attribute only describes the field in the OpenAPI document; the endpoint checks it.
 /// </summary>
 public sealed record SetItemRequest(
     [property: Range(1, CartLimits.MaxQuantity)] int? Quantity);

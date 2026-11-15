@@ -320,8 +320,8 @@ a change it has not seen, solve a different problem and are not built.
 requests are truly parallel: every one is started before any is awaited, and all are released
 by one signal.
 
-- Twenty parallel sets of twenty products: all `200`, twenty lines, versions 1 to 20.
-- Ten parallel first requests of a new user: exactly one cart.
+- Twenty parallel first requests of a new user, for twenty products: all `200`, exactly one
+  cart, twenty lines, versions 1 to 20.
 - The same request ten times at once: one change, version 1.
 - Parallel sets of one line to 2 and to 5, for ten users at once: one line, the later value.
 - Parallel sets, removes and a clear: all `200`, and the stored cart is the one the last
@@ -334,7 +334,7 @@ by one signal.
 - A writer that ignores the lock, changing or creating the cart in the middle of a request:
   `409 concurrency_conflict`, nothing overwritten, one error in the log.
 
-With the one call that takes the lock removed, all five parallel tests above fail.
+With the one call that takes the lock removed, all four parallel tests above fail.
 
 ## Cart rules
 

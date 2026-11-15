@@ -31,7 +31,7 @@ public class CartConcurrencyTests(PostgresFixture postgres)
     private static string ItemPath(string sku) => $"{CartPath}/items/{sku}";
 
     [Fact]
-    public async Task Twenty_parallel_requests_for_twenty_products_all_succeed()
+    public async Task Twenty_parallel_first_requests_for_twenty_products_all_succeed_in_one_cart()
     {
         var skus = await AddProductsAsync(20);
         var userId = TestData.NewUserId();
@@ -43,24 +43,8 @@ public class CartConcurrencyTests(PostgresFixture postgres)
         Assert.All(answers, answer => Assert.Equal(HttpStatusCode.OK, answer.StatusCode));
         var versions = await VersionsOfAsync(answers);
         Assert.Equal(Enumerable.Range(1, 20), versions.Order());
-        using var cart = JsonDocument.Parse(await client.GetStringAsync(CartPath, Cancellation));
-        Assert.Equal(20, cart.RootElement.GetProperty("version").GetInt32());
-        Assert.Equal(skus.Order(StringComparer.Ordinal), SkusOf(cart).Order(StringComparer.Ordinal));
-        Assert.Equal(1, await CountCartsAsync(userId));
-    }
 
-    [Fact]
-    public async Task Ten_parallel_first_requests_of_a_new_user_create_exactly_one_cart()
-    {
-        var skus = await AddProductsAsync(10);
-        var userId = TestData.NewUserId();
-        await using var factory = new CartApiFactory(postgres.ConnectionString, settings: PatientLock);
-        using var client = await factory.CreateClientForAsync(userId, Cancellation);
-
-        var answers = await SendTogetherAsync(skus.Select(sku => Send(() => client.PutAsJsonAsync(ItemPath(sku), new { quantity = 1 }, Cancellation))));
-
-        Assert.All(answers, answer => Assert.Equal(HttpStatusCode.OK, answer.StatusCode));
-        Assert.Equal(1, await CountCartsAsync(userId));
+        // The user had no cart, so all twenty raced to create it: every answer shows the same one.
         var ids = new HashSet<Guid>();
         foreach (var answer in answers)
         {
@@ -70,8 +54,9 @@ public class CartConcurrencyTests(PostgresFixture postgres)
 
         Assert.Single(ids);
         using var cart = JsonDocument.Parse(await client.GetStringAsync(CartPath, Cancellation));
-        Assert.Equal(10, cart.RootElement.GetProperty("items").GetArrayLength());
-        Assert.Equal(10, cart.RootElement.GetProperty("version").GetInt32());
+        Assert.Equal(20, cart.RootElement.GetProperty("version").GetInt32());
+        Assert.Equal(skus.Order(StringComparer.Ordinal), SkusOf(cart).Order(StringComparer.Ordinal));
+        Assert.Equal(1, await CountCartsAsync(userId));
     }
 
     [Fact]
@@ -192,35 +177,8 @@ public class CartConcurrencyTests(PostgresFixture postgres)
             };
         }
 
-        var body = await answer.Content.ReadAsStringAsync(Cancellation);
-        Assert.True(answer.StatusCode == HttpStatusCode.Conflict, $"Expected 409, got {(int)answer.StatusCode}: {body}");
-        Assert.Equal("application/problem+json", answer.Content.Headers.ContentType?.MediaType);
-        using var problem = JsonDocument.Parse(body);
-        Assert.Equal("cart_busy", problem.RootElement.GetProperty("code").GetString());
-        Assert.Equal(409, problem.RootElement.GetProperty("status").GetInt32());
-        Assert.Equal(TimeSpan.FromSeconds(1), answer.Headers.RetryAfter?.Delta);
-        Assert.True(answer.Headers.CacheControl?.NoStore);
+        await AssertBusyAsync(answer, factory, userId);
         Assert.Equal(before, await client.GetStringAsync(CartPath, Cancellation));
-    }
-
-    [Fact]
-    public async Task A_busy_cart_is_logged_once_as_a_warning_and_never_as_an_error()
-    {
-        var sku = await TestCatalog.AddAsync(postgres);
-        var userId = TestData.NewUserId();
-        await using var factory = new CartApiFactory(postgres.ConnectionString, settings: ImpatientLock);
-        using var client = await factory.CreateClientForAsync(userId, Cancellation);
-
-        await using (await CartLock.HoldAsync(postgres.ConnectionString, userId, Cancellation))
-        {
-            await client.PutAsJsonAsync(ItemPath(sku), new { quantity = 1 }, Cancellation).WaitAsync(GivingUp, Cancellation);
-        }
-
-        var entry = Assert.Single(factory.Logs.Entries, entry => entry.Level >= LogLevel.Warning && entry.Scope.ContainsKey("UserId"));
-        Assert.Equal(LogLevel.Warning, entry.Level);
-        Assert.StartsWith("Carts.Api", entry.Category, StringComparison.Ordinal);
-        Assert.Equal(userId, entry.Scope["UserId"]);
-        Assert.Contains("200", entry.Message, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -414,7 +372,6 @@ public class CartConcurrencyTests(PostgresFixture postgres)
 
     [Theory]
     [InlineData("0")]
-    [InlineData("-1")]
     [InlineData("20001")]
     public void The_api_does_not_start_with_a_lock_timeout_outside_its_range(string value)
     {
@@ -429,15 +386,19 @@ public class CartConcurrencyTests(PostgresFixture postgres)
     {
         var body = await answer.Content.ReadAsStringAsync(Cancellation);
         Assert.True(answer.StatusCode == HttpStatusCode.Conflict, $"Expected 409, got {(int)answer.StatusCode}: {body}");
+        Assert.Equal("application/problem+json", answer.Content.Headers.ContentType?.MediaType);
         using var problem = JsonDocument.Parse(body);
         Assert.Equal("cart_busy", problem.RootElement.GetProperty("code").GetString());
         Assert.Equal(TimeSpan.FromSeconds(1), answer.Headers.RetryAfter?.Delta);
+        Assert.True(answer.Headers.CacheControl?.NoStore);
 
-        // One warning from the API itself, and no second entry from the database layer.
+        // One warning from the API itself, naming the configured wait, and no second entry
+        // from the database layer: a busy cart is a busy moment, not a bug.
         var entry = Assert.Single(factory.Logs.Entries, entry => entry.Level >= LogLevel.Warning && entry.Scope.ContainsKey("UserId"));
         Assert.Equal(LogLevel.Warning, entry.Level);
         Assert.StartsWith("Carts.Api", entry.Category, StringComparison.Ordinal);
         Assert.Equal(userId, entry.Scope["UserId"]);
+        Assert.Contains("waiting 200 ms", entry.Message, StringComparison.Ordinal);
     }
 
     private static async Task AssertConflictAsync(HttpResponseMessage answer, CartApiFactory factory, string userId)

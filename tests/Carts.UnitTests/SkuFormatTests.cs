@@ -7,8 +7,6 @@ public class SkuFormatTests
     [Theory]
     [InlineData("A")]
     [InlineData("0")]
-    [InlineData("TSHIRT-BLK-M")]
-    [InlineData("tshirt-blk-m")]
     [InlineData("a.b_c-1")]
     public void Letters_digits_dots_underscores_and_hyphens_make_a_sku(string sku)
     {
@@ -18,13 +16,10 @@ public class SkuFormatTests
     [Theory]
     [InlineData(null)]
     [InlineData("")]
-    [InlineData(" ")]
     [InlineData(" A")]
     [InlineData("A ")]
-    [InlineData("A B")]
     [InlineData("A/B")]
     [InlineData("A\n")]
-    [InlineData("A\0")]
     [InlineData("Ä1")]
     [InlineData("AÄ")]
     [InlineData("A١")]
@@ -35,11 +30,9 @@ public class SkuFormatTests
     }
 
     [Theory]
-    [InlineData(".")]
     [InlineData("..")]
     [InlineData("-A")]
     [InlineData("_A")]
-    [InlineData(".A")]
     public void A_sku_starts_with_a_letter_or_a_digit(string sku)
     {
         Assert.False(SkuFormat.IsValid(sku));

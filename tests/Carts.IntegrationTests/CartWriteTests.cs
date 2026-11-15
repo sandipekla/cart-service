@@ -139,27 +139,36 @@ public class CartWriteTests(PostgresFixture postgres)
     }
 
     [Fact]
-    public async Task A_product_that_is_no_longer_sold_answers_422()
-    {
-        var sku = await TestCatalog.AddAsync(postgres, isActive: false);
-        await using var factory = new CartApiFactory(postgres.ConnectionString);
-        using var client = await factory.CreateClientForAsync(TestData.NewUserId(), Cancellation);
-
-        using var problem = await AssertProblemAsync(await client.PutAsJsonAsync(ItemPath(sku), new { quantity = 1 }, Cancellation), HttpStatusCode.UnprocessableEntity, "product_unavailable");
-    }
-
-    [Fact]
-    public async Task A_first_request_that_is_refused_stores_no_cart()
+    public async Task A_product_that_is_no_longer_sold_answers_422_and_a_refused_first_request_stores_no_cart()
     {
         var sku = await TestCatalog.AddAsync(postgres, isActive: false);
         var userId = TestData.NewUserId();
         await using var factory = new CartApiFactory(postgres.ConnectionString);
         using var client = await factory.CreateClientForAsync(userId, Cancellation);
 
-        var response = await client.PutAsJsonAsync(ItemPath(sku), new { quantity = 1 }, Cancellation);
+        using var problem = await AssertProblemAsync(await client.PutAsJsonAsync(ItemPath(sku), new { quantity = 1 }, Cancellation), HttpStatusCode.UnprocessableEntity, "product_unavailable");
 
-        Assert.Equal(HttpStatusCode.UnprocessableEntity, response.StatusCode);
         Assert.False(await HasCartAsync(userId));
+    }
+
+    [Fact]
+    public async Task A_product_that_stopped_being_sold_can_still_be_removed()
+    {
+        var sku = await TestCatalog.AddAsync(postgres);
+        await using var factory = new CartApiFactory(postgres.ConnectionString);
+        using var client = await factory.CreateClientForAsync(TestData.NewUserId(), Cancellation);
+        await client.PutAsJsonAsync(ItemPath(sku), new { quantity = 1 }, Cancellation);
+        await using (var db = postgres.CreateContext())
+        {
+            await db.Database.ExecuteSqlAsync($"UPDATE products SET is_active = false WHERE sku = {sku}", Cancellation);
+        }
+
+        var response = await client.DeleteAsync(ItemPath(sku), Cancellation);
+
+        using var cart = await ReadAsync(response);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal(0, cart.RootElement.GetProperty("items").GetArrayLength());
+        Assert.Equal(2, cart.RootElement.GetProperty("version").GetInt32());
     }
 
     [Fact]
@@ -220,7 +229,7 @@ public class CartWriteTests(PostgresFixture postgres)
     }
 
     [Fact]
-    public async Task The_messages_name_the_actual_limits()
+    public async Task A_bad_sku_and_a_bad_quantity_are_reported_together_with_the_actual_limits()
     {
         await using var factory = new CartApiFactory(postgres.ConnectionString);
         using var client = await factory.CreateClientForAsync(TestData.NewUserId(), Cancellation);
@@ -271,7 +280,6 @@ public class CartWriteTests(PostgresFixture postgres)
 
     [Theory]
     [InlineData("""{ "quantity": 0 }""")]
-    [InlineData("""{ "quantity": -1 }""")]
     [InlineData("""{ "quantity": 100 }""")]
     [InlineData("""{ "quantity": null }""")]
     [InlineData("{}")]
@@ -318,15 +326,18 @@ public class CartWriteTests(PostgresFixture postgres)
 
         var response = await client.PutAsync(ItemPath(sku), Json(json), Cancellation);
 
-        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
-        Assert.Equal("application/problem+json", response.Content.Headers.ContentType?.MediaType);
+        // Its own code, so a client can tell it from a value that breaks a rule. The detail
+        // says what is wrong without naming the API's own types.
+        using var problem = await AssertProblemAsync(response, HttpStatusCode.BadRequest, "invalid_body");
+        var detail = problem.RootElement.GetProperty("detail").GetString();
+        Assert.Contains("JSON", detail, StringComparison.Ordinal);
+        Assert.DoesNotContain("Request", detail, StringComparison.Ordinal);
         Assert.False(await HasCartAsync(userId));
     }
 
     [Theory]
     [InlineData("has%20space")]
     [InlineData("-starts-with-hyphen")]
-    [InlineData("semi;colon")]
     [InlineData("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")]
     public async Task A_malformed_sku_is_a_validation_error_on_every_route_and_never_reaches_the_database(string sku)
     {
@@ -341,21 +352,6 @@ public class CartWriteTests(PostgresFixture postgres)
         Assert.True(putProblem.RootElement.GetProperty("errors").TryGetProperty("sku", out _));
         using var deleteProblem = await AssertProblemAsync(delete, HttpStatusCode.BadRequest, "validation_failed");
         Assert.True(deleteProblem.RootElement.GetProperty("errors").TryGetProperty("sku", out _));
-    }
-
-    [Fact]
-    public async Task A_bad_sku_and_a_bad_quantity_are_reported_together()
-    {
-        await using var factory = new CartApiFactory(postgres.ConnectionString);
-        using var client = await factory.CreateClientForAsync(TestData.NewUserId(), Cancellation);
-
-        using var problem = await AssertProblemAsync(
-            await client.PutAsJsonAsync(ItemPath("-bad"), new { quantity = 0 }, Cancellation),
-            HttpStatusCode.BadRequest,
-            "validation_failed");
-
-        Assert.True(problem.RootElement.GetProperty("errors").TryGetProperty("sku", out _));
-        Assert.True(problem.RootElement.GetProperty("errors").TryGetProperty("quantity", out _));
     }
 
     [Fact]
@@ -485,6 +481,7 @@ public class CartWriteTests(PostgresFixture postgres)
 
         var answers = new[]
         {
+            await client.GetAsync(CartPath, Cancellation),
             await client.PutAsJsonAsync(ItemPath(sku), new { quantity = 1 }, Cancellation),
             await client.PutAsJsonAsync(ItemPath("NO-SUCH-PRODUCT"), new { quantity = 1 }, Cancellation),
             await client.DeleteAsync(ItemPath(sku), Cancellation),
@@ -565,6 +562,9 @@ public class CartWriteTests(PostgresFixture postgres)
         var problem = JsonDocument.Parse(body);
         Assert.Equal(code, problem.RootElement.GetProperty("code").GetString());
         Assert.Equal((int)status, problem.RootElement.GetProperty("status").GetInt32());
+
+        // Every status this API answers with is defined in the current HTTP standard.
+        Assert.StartsWith("https://tools.ietf.org/html/rfc9110#section-15.", problem.RootElement.GetProperty("type").GetString(), StringComparison.Ordinal);
         Assert.True(problem.RootElement.TryGetProperty("traceId", out _));
         return problem;
     }

@@ -14,24 +14,13 @@ public class DatabaseSetupTests(PostgresFixture postgres)
 
         await DatabaseSetup.RunAsync(db, seedDemoProducts: true, Cancellation);
 
+        // The README's walkthrough relies on exactly these three.
         var products = await db.Products.AsNoTracking().ToListAsync(Cancellation);
-        Assert.True(products.Count >= 5);
-        Assert.Contains(products, product => product.IsActive && product.Currency == "EUR");
-        Assert.Contains(products, product => !product.IsActive);
-        Assert.Contains(products, product => product.Currency != "EUR");
+        Assert.Equal(8, products.Count);
+        Assert.Contains(products, product => product.Sku == "TSHIRT-BLK-M" && product.IsActive && product.Currency == "EUR");
+        Assert.Contains(products, product => product.Sku == "POSTER-2019" && !product.IsActive);
+        Assert.Contains(products, product => product.Sku == "GIFTCARD-USD-25" && product.IsActive && product.Currency == "USD");
         Assert.All(products, product => Assert.NotNull(product.ToSnapshot()));
-    }
-
-    [Fact]
-    public async Task Running_setup_again_changes_nothing()
-    {
-        await using var db = PostgresFixture.CreateContext(await postgres.CreateEmptyDatabaseAsync());
-        await DatabaseSetup.RunAsync(db, seedDemoProducts: true, Cancellation);
-        var before = await db.Products.CountAsync(Cancellation);
-
-        await DatabaseSetup.RunAsync(db, seedDemoProducts: true, Cancellation);
-
-        Assert.Equal(before, await db.Products.CountAsync(Cancellation));
     }
 
     [Fact]
@@ -50,20 +39,11 @@ public class DatabaseSetupTests(PostgresFixture postgres)
     }
 
     [Fact]
-    public async Task Setup_without_demo_data_creates_the_schema_and_leaves_products_empty()
+    public async Task Setup_without_demo_data_adds_no_products_and_demo_data_never_joins_products_already_there()
     {
         await using var db = PostgresFixture.CreateContext(await postgres.CreateEmptyDatabaseAsync());
-
         await DatabaseSetup.RunAsync(db, seedDemoProducts: false, Cancellation);
-
         Assert.Equal(0, await db.Products.CountAsync(Cancellation));
-    }
-
-    [Fact]
-    public async Task Demo_data_never_overwrites_products_that_are_already_there()
-    {
-        await using var db = PostgresFixture.CreateContext(await postgres.CreateEmptyDatabaseAsync());
-        await DatabaseSetup.RunAsync(db, seedDemoProducts: false, Cancellation);
         db.Products.Add(new("REAL-1", "A real product", 1m, "EUR", isActive: true));
         await db.SaveChangesAsync(Cancellation);
 

@@ -81,6 +81,15 @@ public sealed class IdentityProviderTests(PostgresFixture postgres) : IDisposabl
         Assert.Equal(HttpStatusCode.Unauthorized, await StatusWithTokenAsync(factory, forged));
     }
 
+    [Fact]
+    public async Task A_token_the_provider_signed_with_an_algorithm_outside_the_allowed_list_is_refused()
+    {
+        // The key and the signature are genuine; only RS256 and ES256 are accepted.
+        await using var factory = CreateFactory();
+
+        Assert.Equal(HttpStatusCode.Unauthorized, await StatusWithTokenAsync(factory, ProviderToken(factory, subject: TestData.NewUserId(), algorithm: SecurityAlgorithms.RsaSha512)));
+    }
+
     [Theory]
     [InlineData("Authentication:Schemes:Bearer:ValidAudiences:0", "another-api")]
     [InlineData("Authentication:Schemes:Bearer:ValidAudience", "another-api")]
@@ -122,14 +131,15 @@ public sealed class IdentityProviderTests(PostgresFixture postgres) : IDisposabl
         string issuer = Authority,
         string audience = "cart-api",
         TimeSpan? expiresIn = null,
-        RSA? signedWith = null) =>
+        RSA? signedWith = null,
+        string algorithm = SecurityAlgorithms.RsaSha256) =>
         TestTokens.Create(
             factory,
             subject,
             issuer,
             audience,
             expiresIn,
-            credentials: new SigningCredentials(new RsaSecurityKey(signedWith ?? _providerKey) { KeyId = signedWith is null ? StandInProvider.KeyId : "stranger" }, SecurityAlgorithms.RsaSha256));
+            credentials: new SigningCredentials(new RsaSecurityKey(signedWith ?? _providerKey) { KeyId = signedWith is null ? StandInProvider.KeyId : "stranger" }, algorithm));
 
     private static async Task<HttpStatusCode> StatusWithTokenAsync(CartApiFactory factory, string token)
     {
