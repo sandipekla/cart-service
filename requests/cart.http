@@ -1,0 +1,74 @@
+# Requests against the local stack (docker compose up --build --wait).
+# Run them top to bottom. Works with the REST Client extension for VS Code and with the
+# HTTP client built into Visual Studio; the expected answer is noted above each request.
+
+@host = http://localhost:8080
+@cart = {{host}}/api/v1/cart
+
+### Ready? 200 Healthy
+GET {{host}}/health/ready
+
+### A development token for the user "alice". Run this before the cart requests. 200
+# @name token
+POST {{host}}/dev/token
+Content-Type: application/json
+
+{"userId": "alice"}
+
+### The token is taken from the answer above. In a tool that does not support that, replace
+### the value below with the accessToken you copied.
+@accessToken = {{token.response.body.$.accessToken}}
+
+### The empty cart. 200
+GET {{cart}}
+Authorization: Bearer {{accessToken}}
+
+### Put two T-shirts in the cart. 200, one line
+PUT {{cart}}/items/TSHIRT-BLK-M
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{"quantity": 2}
+
+### Add a mug. 200, two lines
+PUT {{cart}}/items/MUG-WHT
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{"quantity": 1}
+
+### Set the T-shirts to three. The quantity replaces the old one; it is never added. 200
+PUT {{cart}}/items/TSHIRT-BLK-M
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{"quantity": 3}
+
+### The cart with both lines. 200
+GET {{cart}}
+Authorization: Bearer {{accessToken}}
+
+### Remove the mug. 200, one line
+DELETE {{cart}}/items/MUG-WHT
+Authorization: Bearer {{accessToken}}
+
+### Remove everything. 200, no lines; the cart keeps its id
+DELETE {{cart}}
+Authorization: Bearer {{accessToken}}
+
+### A quantity outside 1 to 99. 400 validation_failed
+PUT {{cart}}/items/MUG-WHT
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{"quantity": 0}
+
+### A product that does not exist. 404 product_not_found
+PUT {{cart}}/items/NO-SUCH-PRODUCT
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{"quantity": 1}
+
+### No token. 401
+GET {{cart}}

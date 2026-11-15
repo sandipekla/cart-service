@@ -11,6 +11,32 @@ built; see [Not built](#not-built).
 
 The API contract, with examples, is in [docs/api.md](docs/api.md).
 
+## Quick start
+
+Five minutes; Docker is the only prerequisite.
+
+1. Start the database, the migrations with a demo catalog, and the API:
+   `docker compose up --build --wait`
+2. Open <http://localhost:8080/scalar>. It lists the endpoints and can call them.
+3. Under **Development**, run `POST /dev/token` with the body `{"userId":"alice"}`. Copy the
+   `accessToken` from the answer into the **Authentication** box at the top of the page.
+4. Under **Cart**, with `PUT /api/v1/cart/items/{sku}`: set `TSHIRT-BLK-M` to
+   `{"quantity":2}` and `MUG-WHT` to `{"quantity":1}`, then `TSHIRT-BLK-M` to
+   `{"quantity":3}`. The quantity replaces the old one; it is never added. Remove the mug with
+   `DELETE /api/v1/cart/items/{sku}` and look at the result with `GET /api/v1/cart`.
+5. Two refusals: `{"quantity":0}` answers `400 validation_failed`, and with the
+   Authentication box emptied every cart request answers `401`.
+6. Stop and delete the data: `docker compose down --volumes`
+
+| To | Go to |
+|---|---|
+| Send the same requests from an editor | [requests/cart.http](requests/cart.http) |
+| Send them with curl | [Try it from a terminal](#try-it-from-a-terminal) |
+| Run the tests | [Test](#test): `dotnet test`, against a real PostgreSQL |
+| See the platform design and its diagrams | [docs/architecture.md](docs/architecture.md), sections 2.1 and 4 |
+| See how this service would connect to the others | [docs/service-contracts.md](docs/service-contracts.md) (proposed, not built) |
+| See what is built and what is only designed | [Not built](#not-built) |
+
 ## Run
 
 The only prerequisite is Docker with Compose v2 (Docker Desktop, or Docker Engine with the
@@ -34,17 +60,10 @@ This starts three containers:
 
 When the `api` container reports healthy, the API is on <http://localhost:8080>.
 
-### Try it in the browser
+### Demo catalog
 
-Open <http://localhost:8080/scalar>. It lists the API's endpoints and can call them.
-
-1. Under **Development**, run `POST /dev/token` with a body such as `{"userId":"alice"}` and
-   copy the `accessToken` from the answer.
-2. Paste it into the **Authentication** box at the top of the page (bearer token).
-3. Under **Cart**, run `PUT /api/v1/cart/items/{sku}` with `sku` set to `TSHIRT-BLK-M` and
-   the body `{"quantity":2}`, then `GET /api/v1/cart`.
-
-The demo catalog has eight products. Two of them are there to try the rules:
+The browser route is the [quick start](#quick-start) above. The demo catalog has eight
+products. Two of them are there to try the rules:
 
 | SKU | What happens |
 |---|---|
@@ -412,6 +431,8 @@ compose.yaml                   the local stack: database, migrate step, API
 .env.example                   the optional settings of the local stack
 docs/architecture.md           platform design
 docs/api.md                    the API contract, with examples
+docs/service-contracts.md      how this service would connect to the others (proposed)
+requests/cart.http             the walkthrough as requests for an editor's HTTP client
 src/Carts.Domain/              cart rules; no package references
 src/Carts.Api/                 ASP.NET Core minimal API
   Features/Carts/              cart endpoints, the shape of their answers, the service behind them

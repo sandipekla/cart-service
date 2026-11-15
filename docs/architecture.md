@@ -120,21 +120,27 @@ flowchart TB
     ORD --> ORDDB
     CART & CAT & ORD -. outbox .-> BUS
     BUS -. events .-> SHOPW & ORDW
+    BUS -. "product and price changes,<br/>confirmed orders" .-> CART
     SHOPW -. listings .-> MKT
-    SHOPW -. product import .-> ERP
-    ORDW -. order import .-> MKT
+    ERP -. product import .-> SHOPW
+    MKT -. order import .-> ORDW
     ORDW -.-> TAX & ERP & MAIL
     ORD -- payment --> PSP
 ```
 
-Solid lines are synchronous calls a customer waits for. Dotted lines are asynchronous.
+Solid lines are synchronous calls a customer waits for. Dotted lines are asynchronous. An
+arrow points the way the data flows. Of everything drawn, only the Cart service's public API
+and its database exist in this repository; every other box and line is proposed.
 
 - The web shop is a separate front-end application served through the CDN. It and the mobile
   apps are clients of the same API.
 - Marketplaces are a sales channel, but technically an integration: listings go out and orders
   come in through the workers, so they are drawn with the external systems.
-- Not drawn, to keep the sketch readable: the Cart service also consumes product and price
-  events to keep its own product copy, and each worker uses its service's database.
+- The Cart service never calls the Catalog service. It keeps its own copy of product names
+  and prices, fed by the catalog's events, and it clears a cart when the order for it is
+  confirmed. Both inputs, and the internal read that checkout uses, are specified in
+  [service-contracts.md](service-contracts.md) and are not implemented.
+- Not drawn, to keep the sketch readable: each worker uses its service's database.
 
 | Part | Why it is separate |
 |---|---|
@@ -152,7 +158,7 @@ into Catalog if the two always release together.
 | Kind | Where | Rules |
 |---|---|---|
 | Client to platform | REST and JSON over HTTPS through the gateway | Versioned in the path (`/api/v1`), additive changes only, errors as Problem Details (RFC 9457), OpenAPI published |
-| Service to service, synchronous | **Only at checkout**: Order calls Cart (read the cart) and Pricing (binding quote) | One direction, in parallel, with timeouts. Nothing in the shop calls the Order service, so a slow checkout cannot back up into browsing or carts |
+| Service to service, synchronous | **Only at checkout**: Order calls Cart (read the cart), then Pricing (binding quote for those lines) | One direction, one after the other, with timeouts. Nothing in the shop calls the Order service, so a slow checkout cannot back up into browsing or carts |
 | Service to service, asynchronous | Everything else | Transactional outbox, then Kafka, then consumers |
 | Platform to third parties | Payment in the request path; all others from workers | See [section 7](#7-external-integrations) |
 
@@ -261,11 +267,10 @@ sequenceDiagram
     participant T as Tax authority
 
     C->>O: POST /checkout/quote
-    par read in parallel, with timeouts
-        O->>CA: read cart (service token)
-    and
-        O->>P: binding quote for these lines
-    end
+    O->>CA: read the user's cart (service token)
+    CA-->>O: cart id, version, lines
+    O->>P: binding quote for these lines
+    P-->>O: prices, tax, shipping
     O-->>C: quote: lines, tax, shipping, total, quote id
 
     C->>O: POST /checkout (quote id, Idempotency-Key)
@@ -278,9 +283,13 @@ sequenceDiagram
     O->>DB: one transaction: order CONFIRMED, invoice with its number, outbox row
     O-)W: OrderConfirmed (through the outbox and Kafka)
     W->>T: send the invoice, retry inside the legal window
-    O-)CA: the same OrderConfirmed event, the cart is cleared
+    O-)CA: the same OrderConfirmed event (cart id, cart version)
+    Note over CA: cleared only if the cart is still at that version
 ```
 
+- The lines of an order come from the Cart service, never from the client: the Order service
+  reads the cart first and asks Pricing for a binding quote for exactly those lines. Both
+  calls have a timeout; if either fails there is no quote and nothing has been changed.
 - The customer confirms a **quote**, not the cart total. The cart total has no tax, shipping
   or promotions, so comparing against it would fail whenever any of those apply.
 - Not charging twice: the idempotency key is claimed by insert inside the order transaction,
@@ -295,7 +304,9 @@ sequenceDiagram
   reference, about anything pending too long, so a crash between the commit and the call
   loses nothing.
 - The cart is cleared when the order is confirmed, not when it is placed, so a failed payment
-  leaves the cart as it was.
+  leaves the cart as it was. The event names the cart version that was bought, and the cart
+  is cleared only if it is still at that version: whatever a shopper changed after checking
+  out is kept.
 - The invoice row is created in the confirming transaction. Only sending it to the tax
   authority is asynchronous.
 
@@ -578,8 +589,8 @@ below is kept in step with the code and says what exists today.
 | Safe concurrent updates: writes on one cart serialised by a per-user database lock, with a version check and unique keys as the safety net | Implemented, with tests |
 | Integration tests through HTTP on a real PostgreSQL: authentication, every cart endpoint, validation, error format | Implemented |
 | Tests with truly parallel requests on one cart, on a real PostgreSQL | Implemented |
-| Outbox and `cart.changed` events; the consumers that feed `products` and clear a cart after an order | Proposed only |
-| Internal cart read for checkout; guest carts and merge at login; cart expiry | Proposed only |
+| Outbox and `cart.changed` events; the consumers that feed `products` and clear a cart after an order | Proposed only; contracts in [service-contracts.md](service-contracts.md) |
+| Internal cart read for checkout (contract in [service-contracts.md](service-contracts.md)); guest carts and merge at login; cart expiry | Proposed only |
 | Rate limiting, OpenTelemetry traces and metrics | Proposed only |
 
 **Everything else in this document is proposed only:** the Catalog and Order services, both
