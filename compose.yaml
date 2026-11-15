@@ -12,7 +12,9 @@ x-api: &api
     # Development turns on the demo products, the token endpoint and the documentation page.
     # The image itself defaults to Production.
     ASPNETCORE_ENVIRONMENT: Development
-    ConnectionStrings__Carts: Host=db;Port=5432;Database=carts;Username=carts;Password=${POSTGRES_PASSWORD:-carts-local-only}
+    # The pool stays well under PostgreSQL's own limit of 100 connections; above it a burst
+    # of requests is refused by the database and not queued by the API.
+    ConnectionStrings__Carts: Host=db;Port=5432;Database=carts;Username=carts;Password=${POSTGRES_PASSWORD:-carts-local-only};Maximum Pool Size=50
 
 services:
   db:

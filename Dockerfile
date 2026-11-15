@@ -20,10 +20,6 @@ RUN dotnet publish src/Carts.Api/Carts.Api.csproj \
 # Runtime stage: the ASP.NET Core runtime and the published application, nothing else.
 FROM mcr.microsoft.com/dotnet/aspnet:10.0-alpine@sha256:21c3f9798416cba4c0576a947c286231cb71ea2884896cb968253f5c9668f930 AS runtime
 
-# The PostgreSQL driver probes for Kerberos support when it connects. Alpine does not ship
-# the library, and without it every first connection prints a loader error.
-RUN apk add --no-cache krb5-libs
-
 WORKDIR /app
 COPY --from=build /app ./
 

@@ -4,6 +4,7 @@ using Carts.Api.Products;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.EntityFrameworkCore.Migrations;
+using Npgsql;
 
 namespace Carts.Api.Persistence;
 
@@ -13,12 +14,20 @@ public static class PersistenceServiceCollectionExtensions
 
     public static IServiceCollection AddCartPersistence(this IServiceCollection services, IConfiguration configuration)
     {
-        var connectionString = configuration.GetConnectionString(ConnectionStringName);
-        if (string.IsNullOrWhiteSpace(connectionString))
+        var configured = configuration.GetConnectionString(ConnectionStringName);
+        if (string.IsNullOrWhiteSpace(configured))
         {
             throw new InvalidOperationException(
                 $"The connection string 'ConnectionStrings:{ConnectionStringName}' is not configured.");
         }
+
+        // This service never uses Kerberos. Left to its default, the driver tries to negotiate
+        // it on every new connection through a native library, and when the database refused
+        // connections under load that library crashed the whole process.
+        var connectionString = new NpgsqlConnectionStringBuilder(configured)
+        {
+            GssEncryptionMode = GssEncryptionMode.Disable,
+        }.ConnectionString;
 
         // A failed query is logged where its error is handled, not here as well. Only this
         // event is turned down: the category also carries warnings worth seeing.

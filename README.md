@@ -203,6 +203,11 @@ password. If you changed either in `.env`, set `ConnectionStrings__Carts` to mat
   a local machine it should demand an encrypted, verified connection (`SSL Mode=VerifyFull`).
 - A failed SQL statement or a failed save is not logged a second time by the database layer:
   the error that results from it is logged where it is handled.
+- The API's connection pool must be smaller than the database's connection limit (100 in a
+  default PostgreSQL), or a burst of requests is refused by the database and not queued by
+  the API. The Compose stack and the development settings cap the pool at 50
+  (`Maximum Pool Size` in the connection string). Kerberos negotiation with the database is
+  always off; the service does not use it.
 
 To add a migration after changing the model:
 

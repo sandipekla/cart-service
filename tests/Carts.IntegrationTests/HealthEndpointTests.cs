@@ -4,6 +4,7 @@ using System.Net.Sockets;
 using Carts.Api.Persistence;
 using Carts.Domain;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 using Npgsql;
 
 namespace Carts.IntegrationTests;
@@ -122,6 +123,19 @@ public class HealthEndpointTests(PostgresFixture postgres)
         var body = await (await client.GetAsync("/health/ready", Cancellation)).Content.ReadAsStringAsync(Cancellation);
 
         Assert.Equal("Unhealthy", body);
+    }
+
+    [Fact]
+    public void The_api_never_negotiates_kerberos_with_the_database_whatever_the_connection_string_says()
+    {
+        // Negotiating it loads a native library on every new connection. Under a burst of
+        // refused connections that library took the whole process down (exit code 139).
+        using var factory = new CartApiFactory(postgres.ConnectionString + ";GSS Encryption Mode=Prefer");
+        using var scope = factory.Services.CreateScope();
+
+        var used = new NpgsqlConnectionStringBuilder(scope.ServiceProvider.GetRequiredService<CartDbContext>().Database.GetConnectionString());
+
+        Assert.Equal(GssEncryptionMode.Disable, used.GssEncryptionMode);
     }
 
     [Fact]
